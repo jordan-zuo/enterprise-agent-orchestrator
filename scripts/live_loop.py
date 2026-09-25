@@ -28,7 +28,7 @@ except ImportError:
     load_dotenv = None
 
 DOCS = {
-    "lease-7": "recovery clause submetered electricity one hundred percent recharge tenant pays quarterly",
+    "lease-7": "lease recovery clause submetered electricity bill one hundred percent recharge tenant pays quarterly",
     "sopa-notes": "subcontractor statement required before progress payment release insurance certificate currency",
     "q3-utilities": "third quarter utility bill electricity gas water allocations building total",
     "gst-rules": "goods services tax ten percent business activity statement bas separation required",
