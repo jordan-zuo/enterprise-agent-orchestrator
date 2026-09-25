@@ -1,19 +1,21 @@
 from __future__ import annotations
 
+import re
+
 from pydantic import BaseModel, Field, field_validator
 
 from agent.states import AgentState
 
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
+
 
 def _terms(text: str) -> set[str]:
-    """Lowercase tokens with naive plural folding (clauses -> clause)."""
+    """Alphanumeric tokens with naive plural folding (clauses -> clause)."""
     out: set[str] = set()
-    for token in text.lower().split():
-        token = token.strip(".,;:!?\"'()")
+    for token in _TOKEN_RE.findall(text.lower()):
         if len(token) > 3 and token.endswith("s") and not token.endswith("ss"):
             token = token[:-1]
-        if token:
-            out.add(token)
+        out.add(token)
     return out
 
 

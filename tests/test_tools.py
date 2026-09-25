@@ -22,6 +22,12 @@ def test_retrieval_folds_plurals() -> None:
     assert "security-policy" in event
 
 
+def test_retrieval_splits_underscores_and_hyphens() -> None:
+    tool = RetrievalTool(DOCS)
+    event = tool.execute(AgentState(task="t"), RetrievalArgs(query="api_keys-rotated"))
+    assert "security-policy" in event
+
+
 def test_retrieval_no_match_says_so() -> None:
     tool = RetrievalTool(DOCS)
     event = tool.execute(AgentState(task="t"), RetrievalArgs(query="penguin migration"))
