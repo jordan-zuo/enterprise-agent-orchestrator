@@ -65,16 +65,20 @@ def test_model_run_pauses_for_big_ledger_write() -> None:
     assert state.status == "awaiting_approval"
 
 
-def test_model_run_bad_args_raise_loudly() -> None:
+def test_model_run_bad_args_become_feedback_not_crash() -> None:
     client = _ScriptedClient(
-        [{"action": "ledger_write", "args": {"entry_id": "", "amount": -1}, "reason": "bad"}]
+        [
+            {"action": "ledger_write", "args": {"entry_id": "", "amount": -1}, "reason": "bad"},
+            {"action": "finish", "args": {}, "reason": "giving up cleanly"},
+        ]
     )
-    with pytest.raises(Exception):
-        run_with_model(
-            AgentState(task="t", max_steps=5),
-            client,
-            "test",
-            RetrievalTool(DOCS),
-            LedgerWriteTool(),
-            ApprovalQueue(),
-        )
+    state = run_with_model(
+        AgentState(task="t", max_steps=5),
+        client,
+        "test",
+        RetrievalTool(DOCS),
+        LedgerWriteTool(),
+        ApprovalQueue(),
+    )
+    assert state.status == "done"
+    assert any(event.startswith("rejected:") for event in state.history)
