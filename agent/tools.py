@@ -43,12 +43,17 @@ class RetrievalTool:
     """Keyword retrieval over a small in-memory corpus.
 
     Stand-in for the hybrid engine call. Deterministic, no network.
+    Queries are plain words. There is no SQL, no database, no tables.
     """
 
     name = "retrieve"
 
     def __init__(self, documents: dict[str, str]) -> None:
         self._documents = dict(documents)
+
+    def describe(self) -> str:
+        ids = ", ".join(sorted(self._documents))
+        return f"keyword search over documents [{ids}]. Ask with plain words."
 
     def execute(self, state: AgentState, args: RetrievalArgs) -> str:
         query_terms = _terms(args.query)
@@ -73,6 +78,12 @@ class LedgerWriteTool:
     """Append-only ledger. Sensitive: run behind the approval gate."""
 
     name = "ledger_write"
+
+    RULES = (
+        "amounts must be positive numbers (credits are unsupported); "
+        "entry_id and source_doc are required; "
+        "amounts over 10000 pause for human approval"
+    )
 
     def __init__(self) -> None:
         self.entries: list[LedgerArgs] = []

@@ -73,3 +73,11 @@ def test_retry_recovers_after_invented_action() -> None:
     decision = decide(AgentState(task="t"), client, "test-model")
     assert decision.action == "retrieve"
     assert client.calls == 2
+
+
+def test_prompt_carries_tool_catalog() -> None:
+    from agent.driver import _prompt_for
+
+    prompt = _prompt_for(AgentState(task="t"), context="Documents [lease-7]. Ledger rules: positive.")
+    assert "lease-7" in prompt
+    assert "never SQL" in prompt

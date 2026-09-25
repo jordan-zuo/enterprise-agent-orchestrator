@@ -65,12 +65,12 @@ def test_model_run_pauses_for_big_ledger_write() -> None:
     assert state.status == "awaiting_approval"
 
 
-def test_exhaustion_marks_failed_not_running() -> None:
+def test_repeated_move_fails_fast_with_reason() -> None:
     client = _ScriptedClient(
         [{"action": "retrieve", "args": {"query": "rent"}, "reason": "loop"}] * 10
     )
     state = run_with_model(
-        AgentState(task="t", max_steps=3),
+        AgentState(task="t", max_steps=10),
         client,
         "test",
         RetrievalTool(DOCS),
@@ -78,8 +78,8 @@ def test_exhaustion_marks_failed_not_running() -> None:
         ApprovalQueue(),
     )
     assert state.status == "failed"
-    assert "ceiling" in state.failure_reason
-    assert state.history[-1].startswith("exhausted:")
+    assert "repeated" in state.failure_reason
+    assert state.step_count < 10
 
 
 def test_model_run_bad_args_become_feedback_not_crash() -> None:

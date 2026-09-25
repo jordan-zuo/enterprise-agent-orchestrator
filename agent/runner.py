@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from pydantic import ValidationError
@@ -23,13 +24,22 @@ def run_with_model(
 ) -> AgentState:
     """Model proposes, graph disposes. Ceiling and gates always enforced."""
     state.status = "running"
+    context = f"{retrieval.describe()} Ledger rules: {LedgerWriteTool.RULES}."
+    last_move: str | None = None
     while True:
         terminal = route(state)
         if terminal.next_node == "terminal":
             if state.status == "running":
                 state.status = "done"
             return state
-        decision = decide(state, client, model)
+        decision = decide(state, client, model, context=context)
+        move = decision.action + ":" + json.dumps(decision.args, sort_keys=True)
+        if move == last_move:
+            state.status = "failed"
+            state.failure_reason = "repeated ineffective action"
+            state.history.append(f"repeated: {move}")
+            return state
+        last_move = move
         state.step_count += 1
         if decision.action == "finish":
             state.status = "done"
