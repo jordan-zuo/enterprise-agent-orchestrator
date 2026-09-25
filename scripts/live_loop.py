@@ -29,8 +29,8 @@ except ImportError:
 
 DOCS = {
     "lease-7": "lease recovery clause submetered electricity bill one hundred percent recharge tenant pays quarterly",
+    "bill-q3-electricity": "electricity bill quarter three nmi 4102000000 usage 12480 kilowatt hours supply charge total 4820 dollars 60 cents gst included account 8841",
     "sopa-notes": "subcontractor statement required before progress payment release insurance certificate currency",
-    "q3-utilities": "third quarter utility bill electricity gas water allocations building total",
     "gst-rules": "goods services tax ten percent business activity statement bas separation required",
     "journal-howto": "journal entry debit expense credit payable yardi voyager posting reconciliation",
     "docket-guide": "delivery docket tipper truck concrete pour tonnage hire hours purchase order match",

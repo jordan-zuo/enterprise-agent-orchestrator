@@ -27,6 +27,11 @@ def run_with_model(
     context = f"{retrieval.describe()} Ledger rules: {LedgerWriteTool.RULES}."
     last_move: str | None = None
     while True:
+        if state.status == "running" and state.step_count >= state.max_steps:
+            state.status = "failed"
+            state.failure_reason = "step ceiling exhausted without completion"
+            state.history.append("exhausted: step ceiling reached")
+            return state
         terminal = route(state)
         if terminal.next_node == "terminal":
             if state.status == "running":
@@ -65,8 +70,5 @@ def run_with_model(
             # not a crash. The step ceiling bounds repeated failures.
             # Anything else still propagates.
             state.history.append(f"rejected: {exc.errors()[0]['msg']}")
-        if state.step_count >= state.max_steps:
-            state.status = "failed"
-            state.failure_reason = "step ceiling exhausted without completion"
-            state.history.append("exhausted: step ceiling reached")
+        if state.status in ("done", "failed", "awaiting_approval"):
             return state

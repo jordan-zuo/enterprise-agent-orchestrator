@@ -99,3 +99,19 @@ def test_model_run_bad_args_become_feedback_not_crash() -> None:
     )
     assert state.status == "done"
     assert any(event.startswith("rejected:") for event in state.history)
+
+
+def test_ceiling_marks_failed_never_done() -> None:
+    queries = [{"action": "retrieve", "args": {"query": f"topic-{i}"}, "reason": "wander"} for i in range(10)]
+    client = _ScriptedClient(queries)
+    state = run_with_model(
+        AgentState(task="t", max_steps=3),
+        client,
+        "test",
+        RetrievalTool(DOCS),
+        LedgerWriteTool(),
+        ApprovalQueue(),
+    )
+    assert state.status == "failed"
+    assert "ceiling" in state.failure_reason
+    assert state.history[-1].startswith("exhausted:")
