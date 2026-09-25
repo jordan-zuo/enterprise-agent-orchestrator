@@ -1,0 +1,10 @@
+[
+  {"id": "quick-task", "kind": "complete", "steps_needed": 2, "optimal_steps": 2, "expected_done": true},
+  {"id": "long-task", "kind": "complete", "steps_needed": 4, "optimal_steps": 4, "expected_done": true},
+  {"id": "single-step", "kind": "complete", "steps_needed": 1, "optimal_steps": 1, "expected_done": true},
+  {"id": "stubborn-never-finishes", "kind": "stubborn", "max_steps": 5, "expected_done": false},
+  {"id": "small-payment-auto", "kind": "ledger", "entry_id": "j-101", "amount": 250.0, "expected_gated": false, "expected_status": "pending"},
+  {"id": "large-payment-gated-denied", "kind": "ledger", "entry_id": "j-102", "amount": 75000.0, "expected_gated": true, "expected_status": "failed"},
+  {"id": "large-payment-gated-approved", "kind": "ledger", "entry_id": "j-103", "amount": 75000.0, "expected_gated": true, "expected_status": "done", "approve": true},
+  {"id": "garbage-args-rejected", "kind": "bad_args", "entry_id": "", "amount": -50}
+]

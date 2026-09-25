@@ -1,0 +1,76 @@
+{
+  "total": 8,
+  "passed": 8,
+  "pass_rate": 1.0,
+  "completion_rate": 0.75,
+  "mean_trajectory_efficiency": 1.0,
+  "gating_accuracy": 1.0,
+  "cases": [
+    {
+      "id": "quick-task",
+      "kind": "complete",
+      "passed": true,
+      "completed": true,
+      "steps": 2,
+      "efficiency": 1.0,
+      "latency_ms": 0.07
+    },
+    {
+      "id": "long-task",
+      "kind": "complete",
+      "passed": true,
+      "completed": true,
+      "steps": 4,
+      "efficiency": 1.0,
+      "latency_ms": 0.03
+    },
+    {
+      "id": "single-step",
+      "kind": "complete",
+      "passed": true,
+      "completed": true,
+      "steps": 1,
+      "efficiency": 1.0,
+      "latency_ms": 0.01
+    },
+    {
+      "id": "stubborn-never-finishes",
+      "kind": "stubborn",
+      "passed": true,
+      "completed": false,
+      "steps": 5,
+      "efficiency": 0.0,
+      "latency_ms": 0.02
+    },
+    {
+      "id": "small-payment-auto",
+      "kind": "ledger",
+      "passed": true,
+      "gated": false,
+      "status": "pending",
+      "entries": 1
+    },
+    {
+      "id": "large-payment-gated-denied",
+      "kind": "ledger",
+      "passed": true,
+      "gated": true,
+      "status": "failed",
+      "entries": 0
+    },
+    {
+      "id": "large-payment-gated-approved",
+      "kind": "ledger",
+      "passed": true,
+      "gated": true,
+      "status": "done",
+      "entries": 1
+    },
+    {
+      "id": "garbage-args-rejected",
+      "kind": "bad_args",
+      "passed": true,
+      "raised": "ValidationError"
+    }
+  ]
+}
