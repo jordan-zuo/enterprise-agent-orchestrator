@@ -56,4 +56,7 @@ def run_with_model(
             # Anything else still propagates.
             state.history.append(f"rejected: {exc.errors()[0]['msg']}")
         if state.step_count >= state.max_steps:
+            state.status = "failed"
+            state.failure_reason = "step ceiling exhausted without completion"
+            state.history.append("exhausted: step ceiling reached")
             return state
