@@ -5,6 +5,18 @@ from pydantic import BaseModel, Field, field_validator
 from agent.states import AgentState
 
 
+def _terms(text: str) -> set[str]:
+    """Lowercase tokens with naive plural folding (clauses -> clause)."""
+    out: set[str] = set()
+    for token in text.lower().split():
+        token = token.strip(".,;:!?\"'()")
+        if len(token) > 3 and token.endswith("s") and not token.endswith("ss"):
+            token = token[:-1]
+        if token:
+            out.add(token)
+    return out
+
+
 class RetrievalArgs(BaseModel):
     query: str = Field(min_length=1)
     top_k: int = Field(default=1, ge=1, le=5)
@@ -37,10 +49,10 @@ class RetrievalTool:
         self._documents = dict(documents)
 
     def execute(self, state: AgentState, args: RetrievalArgs) -> str:
-        query_terms = set(args.query.lower().split())
+        query_terms = _terms(args.query)
 
         def _score(text: str) -> int:
-            return len(query_terms & set(text.lower().split()))
+            return len(query_terms & _terms(text))
 
         ranked = sorted(self._documents.items(), key=lambda item: _score(item[1]), reverse=True)
         top = [(doc_id, text) for doc_id, text in ranked[: args.top_k] if _score(text) > 0]

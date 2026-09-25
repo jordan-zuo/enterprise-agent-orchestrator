@@ -30,6 +30,7 @@ except ImportError:
 DOCS = {
     "lease-7": "recovery clause submetered electricity one hundred percent recharge",
     "sopa-notes": "subcontractor statement required before progress payment release",
+    "q3-utilities": "third quarter utility bill electricity gas water allocations",
 }
 
 

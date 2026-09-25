@@ -16,6 +16,12 @@ def test_retrieval_returns_top_doc() -> None:
     assert "security-policy" in event
 
 
+def test_retrieval_folds_plurals() -> None:
+    tool = RetrievalTool(DOCS)
+    event = tool.execute(AgentState(task="t"), RetrievalArgs(query="keys rotated"))
+    assert "security-policy" in event
+
+
 def test_retrieval_no_match_says_so() -> None:
     tool = RetrievalTool(DOCS)
     event = tool.execute(AgentState(task="t"), RetrievalArgs(query="penguin migration"))
