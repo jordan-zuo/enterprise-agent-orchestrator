@@ -28,9 +28,12 @@ except ImportError:
     load_dotenv = None
 
 DOCS = {
-    "lease-7": "recovery clause submetered electricity one hundred percent recharge",
-    "sopa-notes": "subcontractor statement required before progress payment release",
-    "q3-utilities": "third quarter utility bill electricity gas water allocations",
+    "lease-7": "recovery clause submetered electricity one hundred percent recharge tenant pays quarterly",
+    "sopa-notes": "subcontractor statement required before progress payment release insurance certificate currency",
+    "q3-utilities": "third quarter utility bill electricity gas water allocations building total",
+    "gst-rules": "goods services tax ten percent business activity statement bas separation required",
+    "journal-howto": "journal entry debit expense credit payable yardi voyager posting reconciliation",
+    "docket-guide": "delivery docket tipper truck concrete pour tonnage hire hours purchase order match",
 }
 
 

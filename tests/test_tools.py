@@ -25,7 +25,7 @@ def test_retrieval_folds_plurals() -> None:
 def test_retrieval_no_match_says_so() -> None:
     tool = RetrievalTool(DOCS)
     event = tool.execute(AgentState(task="t"), RetrievalArgs(query="penguin migration"))
-    assert event == "retrieve: no matching document"
+    assert event == "retrieve [penguin migration]: no matching document"
 
 
 def test_retrieval_blank_query_rejected() -> None:

@@ -57,8 +57,8 @@ class RetrievalTool:
         ranked = sorted(self._documents.items(), key=lambda item: _score(item[1]), reverse=True)
         top = [(doc_id, text) for doc_id, text in ranked[: args.top_k] if _score(text) > 0]
         if not top:
-            return "retrieve: no matching document"
-        return "retrieve: " + ", ".join(doc_id for doc_id, _ in top)
+            return f"retrieve [{args.query}]: no matching document"
+        return f"retrieve [{args.query}]: " + ", ".join(doc_id for doc_id, _ in top)
 
     def as_tool_fn(self, args: RetrievalArgs):
         def _fn(state: AgentState) -> str:
