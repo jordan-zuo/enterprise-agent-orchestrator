@@ -41,10 +41,35 @@ def test_valid_decision_parses() -> None:
 
 
 def test_non_json_raises() -> None:
-    with pytest.raises(ValueError, match="did not return JSON"):
+    with pytest.raises(ValueError, match="failed to route"):
         decide(AgentState(task="t"), _FakeClient("just do things"), "test-model")
 
 
 def test_unknown_action_raises() -> None:
-    with pytest.raises(ValueError, match="unknown action"):
+    with pytest.raises(ValueError, match="failed to route"):
         decide(AgentState(task="t"), _FakeClient('{"action": "teleport"}'), "test-model")
+
+
+class _FlakyClient:
+    """Fails once with an invented action, then routes correctly."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.chat = type(
+            "Chat",
+            (),
+            {"completions": self},
+        )()
+
+    def create(self, **kwargs) -> _FakeCompletion:
+        self.calls += 1
+        if self.calls == 1:
+            return _FakeCompletion('{"action": "fetch_lease_clauses"}')
+        return _FakeCompletion('{"action": "retrieve", "args": {"query": "rent"}}')
+
+
+def test_retry_recovers_after_invented_action() -> None:
+    client = _FlakyClient()
+    decision = decide(AgentState(task="t"), client, "test-model")
+    assert decision.action == "retrieve"
+    assert client.calls == 2
