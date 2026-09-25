@@ -9,6 +9,7 @@ Usage (repo root):
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -27,14 +28,7 @@ try:
 except ImportError:
     load_dotenv = None
 
-DOCS = {
-    "lease-7": "lease recovery clause submetered electricity bill one hundred percent recharge tenant pays quarterly",
-    "bill-q3-electricity": "electricity bill quarter three nmi 4102000000 usage 12480 kilowatt hours supply charge total 4820 dollars 60 cents gst included account 8841",
-    "sopa-notes": "subcontractor statement required before progress payment release insurance certificate currency",
-    "gst-rules": "goods services tax ten percent business activity statement bas separation required",
-    "journal-howto": "journal entry debit expense credit payable yardi voyager posting reconciliation",
-    "docket-guide": "delivery docket tipper truck concrete pour tonnage hire hours purchase order match",
-}
+DOCS = json.load(open(ROOT / "data" / "corpus.json", encoding="utf-8"))
 
 
 def main() -> None:
