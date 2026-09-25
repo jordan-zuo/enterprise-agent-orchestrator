@@ -22,6 +22,11 @@ from agent.runner import run_with_model
 from agent.states import AgentState
 from agent.tools import LedgerWriteTool, RetrievalTool
 
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    load_dotenv = None
+
 DOCS = {
     "lease-7": "recovery clause submetered electricity one hundred percent recharge",
     "sopa-notes": "subcontractor statement required before progress payment release",
@@ -29,7 +34,11 @@ DOCS = {
 
 
 def main() -> None:
+    if load_dotenv is not None:
+        load_dotenv()
     model = os.environ.get("LLM_MODEL", "mistral-Nemo-Instruct-2407")
+    base_url = os.environ.get("LLM_BASE_URL", "https://api.llm7.io/v1")
+    print(f"model={model} base={base_url} (key hidden)")
     client = build_client()
     queue = ApprovalQueue()
     ledger = LedgerWriteTool()

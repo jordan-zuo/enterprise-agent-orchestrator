@@ -17,6 +17,11 @@ KNOWN_ACTIONS = ("retrieve", "ledger_write", "finish", "request_approval")
 
 
 def build_client() -> Any:
+    try:
+        from dotenv import load_dotenv
+    except ImportError as exc:
+        raise RuntimeError("The 'python-dotenv' package is required.") from exc
+    load_dotenv()
     api_key = os.environ.get("LLM_API_KEY", "")
     if not api_key:
         raise RuntimeError("LLM_API_KEY is not set: live model calls need a key.")
