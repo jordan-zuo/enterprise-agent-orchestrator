@@ -57,10 +57,14 @@ def run_with_model(
             elif decision.action == "ledger_write":
                 args = LedgerArgs(**decision.args)
                 out = guarded_ledger_write(state, ledger, args, queue)
-                if state.status == "awaiting_approval":
+                if out.startswith("rejected:"):
+                    pass
+                elif state.status == "awaiting_approval":
                     if not auto_approve:
                         return state
                     resume_after_approval(state, ledger, args, queue, out)
+                else:
+                    state.history.append(out)
             elif decision.action == "request_approval":
                 state.status = "awaiting_approval"
                 state.history.append(f"gated: {decision.reason}")

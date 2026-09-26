@@ -1,6 +1,6 @@
 {
-  "total": 8,
-  "passed": 8,
+  "total": 12,
+  "passed": 12,
   "pass_rate": 1.0,
   "completion_rate": 0.75,
   "mean_trajectory_efficiency": 1.0,
@@ -13,7 +13,7 @@
       "completed": true,
       "steps": 2,
       "efficiency": 1.0,
-      "latency_ms": 0.07
+      "latency_ms": 0.08
     },
     {
       "id": "long-task",
@@ -40,7 +40,7 @@
       "completed": false,
       "steps": 5,
       "efficiency": 0.0,
-      "latency_ms": 0.02
+      "latency_ms": 0.03
     },
     {
       "id": "small-payment-auto",
@@ -71,6 +71,34 @@
       "kind": "bad_args",
       "passed": true,
       "raised": "ValidationError"
+    },
+    {
+      "id": "unquoted-rejected",
+      "kind": "grounding",
+      "passed": true,
+      "allowed": false,
+      "entries": 0
+    },
+    {
+      "id": "quoted-allowed",
+      "kind": "grounding",
+      "passed": true,
+      "allowed": true,
+      "entries": 1
+    },
+    {
+      "id": "bill-math-ok",
+      "kind": "math",
+      "passed": true,
+      "allowed": true,
+      "entries": 1
+    },
+    {
+      "id": "bill-math-bad",
+      "kind": "math",
+      "passed": true,
+      "allowed": false,
+      "entries": 0
     }
   ]
 }

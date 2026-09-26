@@ -54,8 +54,13 @@ def test_model_run_pauses_for_big_ledger_write() -> None:
     client = _ScriptedClient(
         [{"action": "ledger_write", "args": {"entry_id": "j-9", "amount": 99999, "source_doc": "d"}, "reason": "post"}]
     )
+    seeded = AgentState(
+        task="t",
+        max_steps=5,
+        history=["retrieve [seed]: d | total 99999.00"],
+    )
     state = run_with_model(
-        AgentState(task="t", max_steps=5),
+        seeded,
         client,
         "test",
         RetrievalTool(DOCS),

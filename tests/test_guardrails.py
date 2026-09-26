@@ -11,16 +11,26 @@ def _args(amount: float = 100.0) -> LedgerArgs:
     return LedgerArgs(entry_id="j-1", amount=amount, source_doc="q3")
 
 
+def _seeded_state(amount: float, source: str = "q3") -> AgentState:
+    return AgentState(
+        task="t",
+        history=[f"retrieve [seed]: {source} | total {float(amount):.2f}"],
+    )
+
+
 def test_small_amount_executes_at_once() -> None:
-    ledger, queue, state = LedgerWriteTool(), ApprovalQueue(), AgentState(task="t")
+    ledger, queue = LedgerWriteTool(), ApprovalQueue()
+    state = _seeded_state(100.0)
     event = guarded_ledger_write(state, ledger, _args(100.0), queue)
     assert event.startswith("ledger_write:")
     assert state.status == "pending"
     assert queue.pending() == []
+    assert any(event.startswith("ledger_write:") for event in state.history) is False
 
 
 def test_large_amount_gates_behind_ticket() -> None:
-    ledger, queue, state = LedgerWriteTool(), ApprovalQueue(), AgentState(task="t")
+    ledger, queue = LedgerWriteTool(), ApprovalQueue()
+    state = _seeded_state(50_000.0)
     ticket_id = guarded_ledger_write(state, ledger, _args(50_000.0), queue)
     assert ticket_id.startswith("t-")
     assert state.status == "awaiting_approval"
@@ -29,12 +39,37 @@ def test_large_amount_gates_behind_ticket() -> None:
 
 
 def test_approval_resumes_and_writes() -> None:
-    ledger, queue, state = LedgerWriteTool(), ApprovalQueue(), AgentState(task="t")
+    ledger, queue = LedgerWriteTool(), ApprovalQueue()
+    state = _seeded_state(50_000.0)
     ticket_id = guarded_ledger_write(state, ledger, _args(50_000.0), queue)
     event = resume_after_approval(state, ledger, _args(50_000.0), queue, ticket_id)
     assert event.startswith("ledger_write:")
     assert state.status == "done"
     assert len(ledger.entries) == 1
+    assert event in state.history
+
+
+def test_unquoted_amount_rejected() -> None:
+    ledger, queue, state = LedgerWriteTool(), ApprovalQueue(), AgentState(task="t")
+    event = guarded_ledger_write(state, ledger, _args(100.0), queue)
+    assert event.startswith("rejected:")
+    assert len(ledger.entries) == 0
+    assert state.status == "pending"
+
+
+def test_bill_math_mismatch_rejected() -> None:
+    from agent.tools import LedgerArgs as _LA
+
+    ledger, queue = LedgerWriteTool(), ApprovalQueue()
+    args = _LA(entry_id="j-bill", amount=1250.5, source_doc="bill-q3-electricity")
+    state = AgentState(
+        task="t",
+        history=["retrieve [bill]: bill-q3-electricity | Amount due 4049.18 dollars"],
+    )
+    state.history.append("retrieve [bill]: bill-q3-electricity | total 1250.50")
+    event = guarded_ledger_write(state, ledger, args, queue)
+    assert event.startswith("rejected:")
+    assert len(ledger.entries) == 0
 
 
 def test_unknown_ticket_raises() -> None:

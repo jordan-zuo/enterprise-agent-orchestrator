@@ -50,7 +50,13 @@ def main() -> None:
     )
     print(f"status={state.status} steps={state.step_count}")
     for event in state.history:
-        print(f"  - {event}")
+        if event.startswith("retrieve ["):
+            head, _, rest = event.partition(": ")
+            print(f"  - {head}:")
+            for chunk in rest.split(" || "):
+                print(f"      * {chunk[:280]}")
+        else:
+            print(f"  - {event}")
     for ticket in queue.pending():
         print(f"  ! pending approval: {ticket.ticket_id} ({ticket.detail})")
 

@@ -69,6 +69,7 @@ def _run_ledger(case: dict) -> dict:
     ledger, queue = LedgerWriteTool(), ApprovalQueue()
     state = AgentState(task=case["id"])
     args = LedgerArgs(entry_id=case["entry_id"], amount=case["amount"], source_doc="eval")
+    state.history.append(f"retrieve [seed]: eval | total {args.amount:.2f}")
     out = guarded_ledger_write(state, ledger, args, queue)
     if state.status == "awaiting_approval":
         if case.get("approve", False):
@@ -76,7 +77,7 @@ def _run_ledger(case: dict) -> dict:
         else:
             state.status = "failed"
             state.failure_reason = "denied by eval policy"
-    gated = bool(state.history) and state.history[0].startswith("gated:")
+    gated = any(line.startswith("gated:") for line in state.history)
     passed = (gated == case["expected_gated"]) and (state.status == case["expected_status"])
     return {
         "id": case["id"],
@@ -100,6 +101,58 @@ def _run_bad_args(case: dict) -> dict:
         return {"id": case["id"], "kind": case["kind"], "passed": True, "raised": type(exc).__name__}
 
 
+def _run_grounding(case: dict) -> dict:
+    ledger, queue = LedgerWriteTool(), ApprovalQueue()
+    state = AgentState(task=case["id"])
+    args = LedgerArgs(
+        entry_id=case["entry_id"],
+        amount=case["amount"],
+        source_doc=case.get("source_doc", "q3"),
+    )
+    if case.get("seed", False):
+        state.history.append(
+            f"retrieve [seed]: {args.source_doc} | total {args.amount:.2f}"
+        )
+    out = guarded_ledger_write(state, ledger, args, queue)
+    allowed = out.startswith("ledger_write:") or out.startswith("t-")
+    passed = allowed == case["expected_allowed"]
+    return {
+        "id": case["id"],
+        "kind": case["kind"],
+        "passed": passed,
+        "allowed": allowed,
+        "entries": len(ledger.entries),
+    }
+
+
+def _run_math(case: dict) -> dict:
+    ledger, queue = LedgerWriteTool(), ApprovalQueue()
+    bill_text = (
+        "retrieve [bill]: bill-q3-electricity | Amount due 4049.18 dollars, "
+        "that is 4049 dollars 18 cents"
+    )
+    state = AgentState(task=case["id"], history=[bill_text])
+    args = LedgerArgs(
+        entry_id=case["entry_id"],
+        amount=case["amount"],
+        source_doc="bill-q3-electricity",
+    )
+    if abs(float(case["amount"]) - 4049.18) > 0.01:
+        state.history.append(
+            f"retrieve [guess]: bill-q3-electricity | total {float(case['amount']):.2f}"
+        )
+    out = guarded_ledger_write(state, ledger, args, queue)
+    allowed = out.startswith("ledger_write:") or out.startswith("t-")
+    passed = allowed == case["expected_allowed"]
+    return {
+        "id": case["id"],
+        "kind": case["kind"],
+        "passed": passed,
+        "allowed": allowed,
+        "entries": len(ledger.entries),
+    }
+
+
 def main() -> dict:
     cases = json.loads(SUITE_PATH.read_text(encoding="utf-8"))
     results: list[dict] = []
@@ -109,6 +162,10 @@ def main() -> dict:
             results.append(_run_completion(case))
         elif kind == "ledger":
             results.append(_run_ledger(case))
+        elif kind == "grounding":
+            results.append(_run_grounding(case))
+        elif kind == "math":
+            results.append(_run_math(case))
         elif kind == "bad_args":
             results.append(_run_bad_args(case))
         else:

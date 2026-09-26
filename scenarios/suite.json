@@ -6,5 +6,9 @@
   {"id": "small-payment-auto", "kind": "ledger", "entry_id": "j-101", "amount": 250.0, "expected_gated": false, "expected_status": "pending"},
   {"id": "large-payment-gated-denied", "kind": "ledger", "entry_id": "j-102", "amount": 75000.0, "expected_gated": true, "expected_status": "failed"},
   {"id": "large-payment-gated-approved", "kind": "ledger", "entry_id": "j-103", "amount": 75000.0, "expected_gated": true, "expected_status": "done", "approve": true},
-  {"id": "garbage-args-rejected", "kind": "bad_args", "entry_id": "", "amount": -50}
+  {"id": "garbage-args-rejected", "kind": "bad_args", "entry_id": "", "amount": -50},
+  {"id": "unquoted-rejected", "kind": "grounding", "entry_id": "j-201", "amount": 100.0, "source_doc": "q3", "seed": false, "expected_allowed": false},
+  {"id": "quoted-allowed", "kind": "grounding", "entry_id": "j-202", "amount": 100.0, "source_doc": "q3", "seed": true, "expected_allowed": true},
+  {"id": "bill-math-ok", "kind": "math", "entry_id": "j-bill", "amount": 4049.18, "expected_allowed": true},
+  {"id": "bill-math-bad", "kind": "math", "entry_id": "j-bill", "amount": 1250.5, "expected_allowed": false}
 ]
