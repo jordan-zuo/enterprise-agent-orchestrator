@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -9,6 +11,7 @@ class ApprovalTicket(BaseModel):
     detail: str
     decided: bool = False
     approved: bool = False
+    meta: dict[str, Any] = Field(default_factory=dict)
 
 
 class ApprovalQueue:
@@ -18,11 +21,16 @@ class ApprovalQueue:
         self._tickets: dict[str, ApprovalTicket] = {}
         self._counter = 0
 
-    def submit(self, action: str, detail: str) -> str:
+    def submit(
+        self, action: str, detail: str, meta: dict[str, Any] | None = None
+    ) -> str:
         self._counter += 1
         ticket_id = f"t-{self._counter:04d}"
         self._tickets[ticket_id] = ApprovalTicket(
-            ticket_id=ticket_id, action=action, detail=detail
+            ticket_id=ticket_id,
+            action=action,
+            detail=detail,
+            meta=dict(meta or {}),
         )
         return ticket_id
 

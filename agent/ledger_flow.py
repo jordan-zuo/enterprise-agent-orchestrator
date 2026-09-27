@@ -28,7 +28,16 @@ def guarded_ledger_write(
     verdict = assess_ledger(args)
     if not verdict.needs_approval:
         return ledger.execute(state, args)
-    ticket_id = queue.submit(action=ledger.name, detail=verdict.reason)
+    ticket_id = queue.submit(
+        action=ledger.name,
+        detail=verdict.reason,
+        meta={
+            "entry_id": args.entry_id,
+            "amount": args.amount,
+            "currency": args.currency,
+            "source_doc": args.source_doc,
+        },
+    )
     state.status = "awaiting_approval"
     state.history.append(f"gated: {ticket_id} ({verdict.reason})")
     return ticket_id

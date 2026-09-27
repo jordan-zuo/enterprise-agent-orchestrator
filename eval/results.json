@@ -40,7 +40,7 @@
       "completed": false,
       "steps": 5,
       "efficiency": 0.0,
-      "latency_ms": 0.03
+      "latency_ms": 0.04
     },
     {
       "id": "small-payment-auto",
