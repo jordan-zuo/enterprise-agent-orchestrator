@@ -1,6 +1,7 @@
 from agent.approvals import ApprovalQueue
 from agent.bill_math import verify_ledger_math
 from agent.guardrails import assess_grounding, assess_ledger
+from agent.periods import period_compatible
 from agent.states import AgentState
 from agent.tools import LedgerArgs, LedgerWriteTool
 
@@ -25,6 +26,13 @@ def guarded_ledger_write(
     if not math_ok:
         state.history.append(f"rejected: {math_reason}")
         return f"rejected: {math_reason}"
+    evidence = "\n".join(
+        line for line in state.history if args.source_doc in line
+    ) or "\n".join(state.history)
+    period_ok, period_reason = period_compatible(state.task, evidence)
+    if not period_ok:
+        state.history.append(f"rejected: {period_reason}")
+        return f"rejected: {period_reason}"
     verdict = assess_ledger(args)
     if not verdict.needs_approval:
         return ledger.execute(state, args)

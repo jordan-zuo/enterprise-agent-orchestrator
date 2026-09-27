@@ -10,5 +10,7 @@
   {"id": "unquoted-rejected", "kind": "grounding", "entry_id": "j-201", "amount": 100.0, "source_doc": "q3", "seed": false, "expected_allowed": false},
   {"id": "quoted-allowed", "kind": "grounding", "entry_id": "j-202", "amount": 100.0, "source_doc": "q3", "seed": true, "expected_allowed": true},
   {"id": "bill-math-ok", "kind": "math", "entry_id": "j-bill", "amount": 4049.18, "expected_allowed": true},
-  {"id": "bill-math-bad", "kind": "math", "entry_id": "j-bill", "amount": 1250.5, "expected_allowed": false}
+  {"id": "bill-math-bad", "kind": "math", "entry_id": "j-bill", "amount": 1250.5, "expected_allowed": false},
+  {"id": "xmas-apr-rejected", "kind": "period", "task": "agl bill for christmas", "entry_id": "agl-xmas", "amount": 63.7, "source_doc": "bill-agl-apr23", "history": ["retrieve [bill]: bill-agl-apr23 | Amount due 63.70 dollars Due date 23 Apr 2023"], "expected_allowed": false},
+  {"id": "lease-q3-allowed", "kind": "period", "task": "reconcile against lease-7", "entry_id": "lease-7-q3", "amount": 4049.18, "source_doc": "bill-q3-electricity", "history": ["retrieve [bill]: bill-q3-electricity | Amount due 4049.18 dollars Bill period 1 July to 30 September", "retrieve [lease]: lease-7 | Tenant account 99881"], "expected_allowed": true}
 ]

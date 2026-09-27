@@ -153,6 +153,28 @@ def _run_math(case: dict) -> dict:
     }
 
 
+def _run_period(case: dict) -> dict:
+    ledger, queue = LedgerWriteTool(), ApprovalQueue()
+    state = AgentState(task=case["task"])
+    for line in case.get("history", []):
+        state.history.append(line)
+    args = LedgerArgs(
+        entry_id=case["entry_id"],
+        amount=case["amount"],
+        source_doc=case["source_doc"],
+    )
+    out = guarded_ledger_write(state, ledger, args, queue)
+    allowed = out.startswith("ledger_write:") or out.startswith("t-")
+    passed = allowed == case["expected_allowed"]
+    return {
+        "id": case["id"],
+        "kind": case["kind"],
+        "passed": passed,
+        "allowed": allowed,
+        "entries": len(ledger.entries),
+    }
+
+
 def main() -> dict:
     cases = json.loads(SUITE_PATH.read_text(encoding="utf-8"))
     results: list[dict] = []
@@ -166,6 +188,8 @@ def main() -> dict:
             results.append(_run_grounding(case))
         elif kind == "math":
             results.append(_run_math(case))
+        elif kind == "period":
+            results.append(_run_period(case))
         elif kind == "bad_args":
             results.append(_run_bad_args(case))
         else:

@@ -1,6 +1,6 @@
 {
-  "total": 12,
-  "passed": 12,
+  "total": 14,
+  "passed": 14,
   "pass_rate": 1.0,
   "completion_rate": 0.75,
   "mean_trajectory_efficiency": 1.0,
@@ -13,7 +13,7 @@
       "completed": true,
       "steps": 2,
       "efficiency": 1.0,
-      "latency_ms": 0.08
+      "latency_ms": 0.07
     },
     {
       "id": "long-task",
@@ -22,7 +22,7 @@
       "completed": true,
       "steps": 4,
       "efficiency": 1.0,
-      "latency_ms": 0.03
+      "latency_ms": 0.02
     },
     {
       "id": "single-step",
@@ -40,7 +40,7 @@
       "completed": false,
       "steps": 5,
       "efficiency": 0.0,
-      "latency_ms": 0.04
+      "latency_ms": 0.02
     },
     {
       "id": "small-payment-auto",
@@ -99,6 +99,20 @@
       "passed": true,
       "allowed": false,
       "entries": 0
+    },
+    {
+      "id": "xmas-apr-rejected",
+      "kind": "period",
+      "passed": true,
+      "allowed": false,
+      "entries": 0
+    },
+    {
+      "id": "lease-q3-allowed",
+      "kind": "period",
+      "passed": true,
+      "allowed": true,
+      "entries": 1
     }
   ]
 }
