@@ -50,3 +50,33 @@ def test_ledger_appends_and_receipts() -> None:
 def test_ledger_rejects_bad_args() -> None:
     with pytest.raises(ValidationError):
         LedgerArgs(entry_id="", amount=-5, source_doc="")
+
+
+def test_retrieval_snippet_preserves_query_matches_and_account_number() -> None:
+    corpus = {
+        "bill-1": (
+            "Electricity tax invoice. Account number 123456. Name Jane Citizen. "
+            "Supply address 1 Street Road. Amount due 79.87 dollars. "
+            "Solar exports feed-in tariff 463 kWh at 0.09 dollars per kWh. "
+            "Previous reading 8763 current reading 9226."
+        )
+    }
+    tool = RetrievalTool(corpus)
+    event = tool.execute(AgentState(task="t"), RetrievalArgs(query="463 kWh solar exports"))
+    assert "123456" in event
+    assert "463" in event
+    assert "Jane Citizen" in event
+    assert "bill-1" in event
+
+
+def test_retrieval_ranks_multiple_candidates_by_relevance() -> None:
+    corpus = {
+        "bill-sam": "Electricity invoice for Sam Sample. Solar export 200 kWh.",
+        "bill-jane": "Electricity invoice for Jane Citizen. Solar exports feed-in tariff 463 kWh. Average daily solar exports.",
+        "bill-water": "Water service quarterly invoice.",
+    }
+    tool = RetrievalTool(corpus)
+    event = tool.execute(AgentState(task="t"), RetrievalArgs(query="solar export", top_k=2))
+    assert "bill-jane" in event
+    assert "bill-sam" in event
+    assert "bill-water" not in event

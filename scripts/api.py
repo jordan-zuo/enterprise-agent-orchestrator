@@ -14,11 +14,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import Response, StreamingResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 ROOT = Path(__file__).resolve().parent.parent
+STATIC_DIR = ROOT / "static"
 sys.path.insert(0, str(ROOT))
 
 from agent import store  # noqa: E402
@@ -81,14 +82,32 @@ def health() -> dict[str, bool]:
 
 
 @app.get("/")
-def index() -> dict[str, Any]:
+def index(request: Request) -> Any:
+    index_file = STATIC_DIR / "index.html"
+    if "text/html" in request.headers.get("accept", "") and index_file.exists():
+        return FileResponse(index_file)
     return {
         "service": "enterprise-agent-orchestrator",
+        "ui": "/ui",
         "docs": "/docs",
         "health": "/health",
         "ledger": "/ledger",
         "approvals": "/approvals",
+        "corpus": "/corpus",
     }
+
+
+@app.get("/ui")
+def ui() -> Any:
+    index_file = STATIC_DIR / "index.html"
+    if index_file.exists():
+        return FileResponse(index_file)
+    raise HTTPException(status_code=404, detail="UI not installed")
+
+
+@app.get("/corpus")
+def corpus() -> dict[str, str]:
+    return _docs()
 
 
 @app.get("/favicon.ico")

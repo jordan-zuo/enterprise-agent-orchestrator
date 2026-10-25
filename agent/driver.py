@@ -38,8 +38,9 @@ def _prompt_for(state: Any, hint: str = "", context: str = "") -> str:
         "You route one step of a deterministic workflow. "
         "You MUST pick action from exactly this set: retrieve, ledger_write, "
         "finish, request_approval. Any other action string is invalid. "
-        "Advance every step. Never repeat a query that already returned "
-        "results. Retrieve the bill first, then write. "
+        "Advance every step. Never repeat a query that already returned results in history. "
+        "For posting tasks: retrieve the bill first, then write. "
+        "For informational questions or comparisons: do not write to the ledger; compare the retrieved figures and call finish with the direct answer in reason. "
         "When the task names lease-7, query account 99881 and lot 7 "
         "quarterly bill, not any sample bill. "
         "Post only the bill matching the task period and account. "
@@ -54,9 +55,11 @@ def _prompt_for(state: Any, hint: str = "", context: str = "") -> str:
         "Never invent amounts. source_doc must be a retrieved doc id. "
         "Entries targeting lease7 must use source bill-q3-electricity, "
         "and only when the task mentions lease-7. "
-        "finish: task is fully done, nothing left to do. request_approval: "
-        "pause for a human decision. "
-        "Arg shapes: retrieve takes {query}; ledger_write takes "
+        "finish: task is fully done; for informational questions, provide the complete answer including all requested details in reason. "
+        "If a requested detail (such as customer name) was not in the snippet, retrieve with that term or doc id first before finishing. "
+        "For comparative questions (such as who has the highest or lowest amount), make sure to compare all candidate bills in context before concluding. "
+        "request_approval: pause for a human decision. "
+        "Arg shapes: retrieve takes {query, top_k (optional, 1 to 10)}; ledger_write takes "
         "{entry_id, amount, source_doc}; finish takes {}; request_approval "
         "takes {reason}. Reply with ONLY this JSON object: "
         '{"action": "<one of the four>", "args": {...}, "reason": "<short>"}. '
@@ -97,7 +100,7 @@ def decide(state: Any, client: Any, model: str, max_attempts: int = 2, context: 
             model=model,
             messages=[{"role": "user", "content": _prompt_for(state, hint, context)}],
             temperature=0,
-            max_tokens=200,
+            max_tokens=500,
         )
         content = completion.choices[0].message.content or ""
         try:

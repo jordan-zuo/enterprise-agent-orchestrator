@@ -51,6 +51,23 @@ def test_health(isolated_db) -> None:
     assert client.get("/health").json() == {"ok": True}
 
 
+def test_ui_and_corpus_endpoints(isolated_db) -> None:
+    client = TestClient(api.app)
+    # JSON index
+    res_json = client.get("/", headers={"accept": "application/json"})
+    assert res_json.status_code == 200
+    assert "service" in res_json.json()
+    # HTML UI
+    res_ui = client.get("/ui")
+    assert res_ui.status_code == 200
+    assert "text/html" in res_ui.headers["content-type"]
+    assert "Enterprise Agent Orchestrator" in res_ui.text
+    # Corpus
+    res_corpus = client.get("/corpus")
+    assert res_corpus.status_code == 200
+    assert "lease-7" in res_corpus.json()
+
+
 def test_run_persists_quoted_write_and_replays(isolated_db, monkeypatch) -> None:
     monkeypatch.setattr(api, "TEST_CLIENT", _ScriptedClient(_quoted_flow()))
     client = TestClient(api.app)
