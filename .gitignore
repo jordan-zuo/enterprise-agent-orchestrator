@@ -8,3 +8,4 @@ data/app.db
 data/*.db
 .tmp/
 data/archive/
+HANDOFF.md
