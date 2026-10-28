@@ -41,7 +41,7 @@ def main() -> None:
     queue = ApprovalQueue()
     ledger = LedgerWriteTool()
     state = run_with_model(
-        AgentState(task="Reconcile the electricity bill against lease-7 and post it.", max_steps=6),
+        AgentState(task="Reconcile the Origin standing bill and post its total amount due.", max_steps=6),
         client,
         model,
         RetrievalTool(DOCS),

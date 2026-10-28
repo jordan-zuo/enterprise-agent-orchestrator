@@ -2,7 +2,7 @@ import pytest
 
 from agent.approvals import ApprovalQueue
 from agent.runner import run_with_model
-from agent.states import AgentState
+from agent.states import AgentState, Evidence
 from agent.tools import LedgerWriteTool, RetrievalTool
 
 
@@ -50,6 +50,34 @@ def test_model_run_completes_retrieve_then_finish() -> None:
     assert any("lease-7" in event for event in state.history)
 
 
+def test_posting_on_the_last_allowed_step_still_completes() -> None:
+    docs = {"bill-1": "amount due 10.00 dollars"}
+    client = _ScriptedClient(
+        [
+            {"action": "retrieve", "args": {"query": "amount due"}, "reason": "find bill"},
+            {
+                "action": "ledger_write",
+                "args": {"entry_id": "j-1", "amount": 10.0, "source_doc": "bill-1"},
+                "reason": "post",
+            },
+        ]
+    )
+    state = run_with_model(
+        AgentState(task="post the bill", max_steps=2),
+        client,
+        "test",
+        RetrievalTool(docs),
+        LedgerWriteTool(),
+        ApprovalQueue(),
+    )
+    assert state.status == "done"
+    assert state.posted
+    assert any(
+        "step ceiling reached after the required posting" in event
+        for event in state.history
+    )
+
+
 def test_model_run_pauses_for_big_ledger_write() -> None:
     client = _ScriptedClient(
         [{"action": "ledger_write", "args": {"entry_id": "j-9", "amount": 99999, "source_doc": "d"}, "reason": "post"}]
@@ -57,7 +85,7 @@ def test_model_run_pauses_for_big_ledger_write() -> None:
     seeded = AgentState(
         task="t",
         max_steps=5,
-        history=["retrieve [seed]: d | total 99999.00"],
+        evidence=[Evidence(doc_id="d", text="total 99999.00")],
     )
     state = run_with_model(
         seeded,
@@ -70,9 +98,16 @@ def test_model_run_pauses_for_big_ledger_write() -> None:
     assert state.status == "awaiting_approval"
 
 
-def test_repeated_move_fails_fast_with_reason() -> None:
+def test_repeated_write_fails_fast_with_reason() -> None:
     client = _ScriptedClient(
-        [{"action": "retrieve", "args": {"query": "rent"}, "reason": "loop"}] * 10
+        [
+            {
+                "action": "ledger_write",
+                "args": {"entry_id": "j-1", "amount": 10.0, "source_doc": "lease-7"},
+                "reason": "loop",
+            }
+        ]
+        * 10
     )
     state = run_with_model(
         AgentState(task="t", max_steps=10),
@@ -85,6 +120,105 @@ def test_repeated_move_fails_fast_with_reason() -> None:
     assert state.status == "failed"
     assert "repeated" in state.failure_reason
     assert state.step_count < 10
+
+
+def test_repeated_retrieve_is_allowed_and_the_run_continues() -> None:
+    """The same harmless search twice must not kill the run."""
+    client = _ScriptedClient(
+        [
+            {"action": "retrieve", "args": {"query": "recovery clause"}, "reason": "look"},
+            {"action": "retrieve", "args": {"query": "recovery clause"}, "reason": "look again"},
+            {"action": "finish", "args": {}, "reason": "have what is needed"},
+        ]
+    )
+    state = run_with_model(
+        AgentState(task="t", max_steps=5),
+        client,
+        "test",
+        RetrievalTool(DOCS),
+        LedgerWriteTool(),
+        ApprovalQueue(),
+    )
+    assert state.status == "done"
+    assert state.step_count == 3
+
+
+def test_finish_without_posting_is_not_done() -> None:
+    """Saying 'done' after naming an amount, with nothing posted, is a lie."""
+    client = _ScriptedClient(
+        [
+            {"action": "retrieve", "args": {"query": "recovery clause"}, "reason": "look"},
+            {"action": "finish", "args": {}, "reason": "Sam owes 63.70"},
+        ]
+    )
+    state = run_with_model(
+        AgentState(task="post the bill with the lowest solar export", max_steps=6),
+        client,
+        "test",
+        RetrievalTool(DOCS),
+        LedgerWriteTool(),
+        ApprovalQueue(),
+    )
+    assert state.status == "failed"
+    assert "none was made" in state.failure_reason
+    assert any(line.startswith("not finished:") for line in state.history)
+
+
+def test_finish_after_a_posting_is_done() -> None:
+    client = _ScriptedClient(
+        [
+            {
+                "action": "ledger_write",
+                "args": {"entry_id": "sam", "amount": 10.0, "source_doc": "d"},
+                "reason": "post it",
+            },
+            {"action": "finish", "args": {}, "reason": "posted"},
+        ]
+    )
+    ledger = LedgerWriteTool()
+    state = run_with_model(
+        AgentState(
+            task="post the bill",
+            max_steps=6,
+            evidence=[Evidence(doc_id="d", text="total 10.00")],
+        ),
+        client,
+        "test",
+        RetrievalTool(DOCS),
+        ledger,
+        ApprovalQueue(),
+    )
+    assert state.status == "done"
+    assert len(ledger.entries) == 1
+
+
+def test_finish_after_an_already_posted_bill_is_done() -> None:
+    """Nothing left to post is a settled outcome, not a failure."""
+    client = _ScriptedClient(
+        [
+            {
+                "action": "ledger_write",
+                "args": {"entry_id": "sam", "amount": 10.0, "source_doc": "d"},
+                "reason": "post it",
+            },
+            {"action": "finish", "args": {}, "reason": "already posted"},
+        ]
+    )
+    ledger = LedgerWriteTool(posted=lambda args: {"entry_id": "x", "run_id": "r-1"})
+    state = run_with_model(
+        AgentState(
+            task="post the bill",
+            max_steps=6,
+            evidence=[Evidence(doc_id="d", text="total 10.00")],
+        ),
+        client,
+        "test",
+        RetrievalTool(DOCS),
+        ledger,
+        ApprovalQueue(),
+    )
+    assert state.status == "done"
+    assert ledger.entries == []
 
 
 def test_model_run_bad_args_become_feedback_not_crash() -> None:

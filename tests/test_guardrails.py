@@ -3,7 +3,7 @@ import pytest
 from agent.approvals import ApprovalQueue
 from agent.guardrails import assess_ledger
 from agent.ledger_flow import guarded_ledger_write, resume_after_approval
-from agent.states import AgentState
+from agent.states import AgentState, Evidence
 from agent.tools import LedgerArgs, LedgerWriteTool
 
 
@@ -14,7 +14,7 @@ def _args(amount: float = 100.0) -> LedgerArgs:
 def _seeded_state(amount: float, source: str = "q3") -> AgentState:
     return AgentState(
         task="t",
-        history=[f"retrieve [seed]: {source} | total {float(amount):.2f}"],
+        evidence=[Evidence(doc_id=source, text=f"total {float(amount):.2f}")],
     )
 
 
@@ -64,9 +64,14 @@ def test_bill_math_mismatch_rejected() -> None:
     args = _LA(entry_id="j-bill", amount=1250.5, source_doc="bill-q3-electricity")
     state = AgentState(
         task="t",
-        history=["retrieve [bill]: bill-q3-electricity | Amount due 4049.18 dollars"],
+        evidence=[
+            Evidence(
+                doc_id="bill-q3-electricity",
+                text="Amount due 4049.18 dollars",
+            ),
+            Evidence(doc_id="bill-q3-electricity", text="total 1250.50"),
+        ],
     )
-    state.history.append("retrieve [bill]: bill-q3-electricity | total 1250.50")
     event = guarded_ledger_write(state, ledger, args, queue)
     assert event.startswith("rejected:")
     assert len(ledger.entries) == 0

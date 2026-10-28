@@ -1,20 +1,22 @@
 """HTTP service over the deterministic runner. SQLite backed.
 
-Run records persist with replayable events. Ledger stays append only.
-Approvals pause large writes behind tickets and resume on decision.
-
-Usage (repo root):
-    uvicorn scripts.api:app --port 8000
+Runs execute in a background thread and return a run id immediately.
+Each step is persisted and streamed as it happens (SSE tail), so the UI
+never waits for the model to finish before showing progress.
 """
 from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+import anyio
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -25,9 +27,10 @@ sys.path.insert(0, str(ROOT))
 from agent import store  # noqa: E402
 from agent.approvals import ApprovalQueue  # noqa: E402
 from agent.bill_math import verify_ledger_math  # noqa: E402
-from agent.guardrails import assess_grounding  # noqa: E402
+from agent.guardrails import assess_due_amount, assess_grounding  # noqa: E402
+from agent.periods import period_compatible  # noqa: E402
 from agent.runner import run_with_model  # noqa: E402
-from agent.states import AgentState  # noqa: E402
+from agent.states import AgentState, Evidence  # noqa: E402
 from agent.tools import LedgerArgs, LedgerWriteTool, RetrievalTool  # noqa: E402
 
 app = FastAPI(title="enterprise-agent-orchestrator")
@@ -38,10 +41,17 @@ TEST_CLIENT: Any = None
 class RunRequest(BaseModel):
     task: str = Field(min_length=1)
     max_steps: int = Field(default=6, ge=1, le=20)
+    request_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 class DecideRequest(BaseModel):
     approved: bool
+    decided_by: str = Field(default="web-ui", min_length=1)
+    note: str = ""
+
+
+class ResetRequest(BaseModel):
+    confirm: bool = False
 
 
 def _client() -> Any:
@@ -57,23 +67,138 @@ def _model() -> str:
 
 
 def _docs() -> dict[str, str]:
-    return json.loads((ROOT / "data" / "corpus.json").read_text(encoding="utf-8"))
+    override = os.environ.get("APP_CORPUS")
+    path = Path(override) if override else ROOT / "data" / "corpus.json"
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _kind(event: str) -> str:
-    for prefix in (
-        "retrieve",
-        "ledger_write",
-        "rejected",
-        "gated",
-        "finish",
-        "exhausted",
-        "repeated",
-        "denied",
-    ):
-        if event.startswith(prefix):
-            return prefix
-    return "note"
+TERMINAL_STATUSES = frozenset({"done", "failed", "cancelled"})
+
+# Runs are model-bound and slow; the request that started one must not wait.
+_RUNS = ThreadPoolExecutor(max_workers=4, thread_name_prefix="run")
+
+# Process-local stop signals. A run only has an entry while its worker lives.
+_CANCELS: dict[str, threading.Event] = {}
+
+
+def _persist_side_effect(
+    run_id: str, kind: str, data: dict[str, Any], queue: ApprovalQueue
+) -> None:
+    """Make the world match the event before anyone can see the event.
+
+    A ledger row exists when ``ledger_write`` is announced, and a ticket
+    exists when ``gated`` is announced, so a UI that reacts to the stream
+    always finds both.
+    """
+    if kind == "ledger_write" and data.get("entry_id"):
+        store.insert_ledger_entry(
+            run_id,
+            str(data["entry_id"]),
+            float(data["amount"]),
+            str(data["currency"]),
+            str(data["source_doc"]),
+        )
+    elif kind == "gated":
+        wanted = data.get("ticket_id")
+        for ticket in queue.pending():
+            if ticket.ticket_id == wanted:
+                store.submit_approval(
+                    ticket.ticket_id,
+                    run_id,
+                    ticket.action,
+                    ticket.detail,
+                    ticket.meta,
+                    ticket.evidence,
+                )
+                break
+
+
+def _deny_pending_tickets(run_id: str) -> list[str]:
+    """Close any ticket that exists while the run is being cancelled.
+
+    Called by the cancel endpoint and again by the worker on exit, because a
+    gate can be persisted in the small window between the click and the stop.
+    """
+    denied: list[str] = []
+    for ticket in store.pending_approvals_for_run(run_id):
+        try:
+            store.decide_approval(
+                ticket["ticket_id"], False, "system", "cancelled by user"
+            )
+        except store.AlreadyDecided:
+            continue
+        store.append_event(
+            run_id,
+            "denied",
+            f"denied: Ticket #{ticket['display_no']} (cancelled by user)",
+            {
+                "ticket_id": ticket["ticket_id"],
+                "action": ticket["action"],
+                "decided_by": "system",
+                "note": "cancelled by user",
+            },
+        )
+        denied.append(ticket["ticket_id"])
+    return denied
+
+
+def _execute_run(
+    run_id: str, task: str, max_steps: int, cancel: threading.Event
+) -> None:
+    """Worker body. Every step lands in the store the moment it happens."""
+    retrieval = RetrievalTool(_docs())
+    ledger = LedgerWriteTool(
+        posted=lambda args: store.find_ledger_posting(
+            args.source_doc, args.amount, args.currency
+        )
+    )
+    queue = ApprovalQueue()
+    state = AgentState(task=task, max_steps=max_steps)
+
+    def _status() -> str:
+        # Cancellation wins over whatever the step just set, so a slow step
+        # finishing after the click can never resurrect "running".
+        return "cancelled" if cancel.is_set() else state.status
+
+    def sink(kind: str, body: str, data: dict[str, Any]) -> None:
+        try:
+            _persist_side_effect(run_id, kind, data, queue)
+            store.append_event(run_id, kind, body, data)
+            store.set_run_status(run_id, _status(), state.step_count)
+        except store.DuplicateLedgerEntry as exc:
+            # A duplicate entry is a containment failure, not a silent skip.
+            store.append_event(run_id, "error", str(exc), {"reason": str(exc)})
+            if not cancel.is_set():
+                state.status = "failed"
+                state.failure_reason = str(exc)
+            store.set_run_status(run_id, _status(), state.step_count)
+            raise
+
+    state.stream_to(sink)
+    try:
+        state = run_with_model(
+            state,
+            _client(),
+            _model(),
+            retrieval,
+            ledger,
+            queue,
+            cancel=cancel,
+        )
+    except Exception as exc:
+        # A loud failure must still leave an explainable run record.
+        message = f"{type(exc).__name__}: {exc}"
+        store.append_event(run_id, "error", message, {"reason": message})
+        if not cancel.is_set():
+            state.status = "failed"
+            state.failure_reason = message
+        store.set_run_status(run_id, _status(), state.step_count)
+        return
+    finally:
+        if cancel.is_set():
+            _deny_pending_tickets(run_id)
+        _CANCELS.pop(run_id, None)
+    store.set_run_status(run_id, _status(), state.step_count)
 
 
 @app.get("/health")
@@ -118,7 +243,17 @@ def favicon() -> Response:
 @app.get("/ledger")
 def ledger() -> dict[str, Any]:
     store.init_db()
-    return {"entries": store.list_ledger()}
+    entries = store.list_ledger()
+    # Postings made before the one-bill-one-row guard can still repeat the
+    # same document. They are immutable, so mark them instead of hiding them.
+    counts: dict[tuple[str, float, str], int] = {}
+    for item in entries:
+        key = (item["source_doc"], float(item["amount"]), item["currency"])
+        counts[key] = counts.get(key, 0) + 1
+    for item in entries:
+        key = (item["source_doc"], float(item["amount"]), item["currency"])
+        item["duplicate"] = counts[key] > 1
+    return {"entries": entries}
 
 
 @app.get("/storage")
@@ -132,48 +267,70 @@ def storage() -> dict[str, Any]:
     }
 
 
+@app.post("/admin/reset")
+def reset(req: ResetRequest) -> dict[str, Any]:
+    """Archive the current database and start empty.
+
+    Destructive by intent, so it needs an explicit ``confirm`` and it never
+    deletes rows without first writing a copy you can open.
+    """
+    if not req.confirm:
+        raise HTTPException(status_code=400, detail="reset requires confirm=true")
+    store.init_db()
+    archived = store.archive_and_clear()
+    return {
+        "archived": str(archived),
+        "tables": store.table_counts(),
+    }
+
+
 @app.get("/approvals")
 def approvals() -> dict[str, Any]:
     store.init_db()
     return {"pending": store.list_pending_approvals()}
 
 
-@app.post("/run")
-def create_run(req: RunRequest) -> dict[str, Any]:
-    store.init_db()
-    run_id = store.create_run(req.task)
-    retrieval = RetrievalTool(_docs())
-    ledger = LedgerWriteTool()
-    queue: ApprovalQueue = ApprovalQueue()
-    state = run_with_model(
-        AgentState(task=req.task, max_steps=req.max_steps),
-        _client(),
-        _model(),
-        retrieval,
-        ledger,
-        queue,
-    )
-    for event in state.history:
-        store.append_event(run_id, _kind(event), event)
-    for entry in ledger.entries:
-        store.insert_ledger_entry(
-            run_id, entry.entry_id, entry.amount, entry.currency, entry.source_doc
-        )
-    for ticket in queue.pending():
-        store.submit_approval(
-            ticket.ticket_id,
-            run_id,
-            ticket.action,
-            ticket.detail,
-            ticket.meta,
-        )
-    store.set_run_status(run_id, state.status, state.step_count)
+def _run_receipt(run: dict[str, Any], replayed: bool) -> dict[str, Any]:
+    run_id = run["run_id"]
     return {
         "run_id": run_id,
-        "status": state.status,
-        "steps": state.step_count,
-        "history": state.history,
+        "status": run["status"],
+        "stream": f"/runs/{run_id}/stream",
+        "replayed": replayed,
     }
+
+
+@app.post("/run", status_code=202)
+def create_run(req: RunRequest) -> dict[str, Any]:
+    store.init_db()
+    if req.request_id:
+        existing = store.find_run_by_request(req.request_id)
+        if existing is not None:
+            return _run_receipt(existing, True)
+    try:
+        run_id = store.create_run(req.task, request_id=req.request_id)
+    except sqlite3.IntegrityError:
+        # Lost a race with a concurrent submit carrying the same request id.
+        existing = (
+            store.find_run_by_request(req.request_id) if req.request_id else None
+        )
+        if existing is None:
+            raise
+        return _run_receipt(existing, True)
+    cancel = threading.Event()
+    _CANCELS[run_id] = cancel
+    try:
+        _RUNS.submit(_execute_run, run_id, req.task, req.max_steps, cancel)
+    except Exception:
+        _CANCELS.pop(run_id, None)
+        raise
+    return _run_receipt({"run_id": run_id, "status": "running"}, False)
+
+
+@app.get("/runs")
+def runs(limit: int = Query(default=20, ge=1, le=100)) -> dict[str, Any]:
+    store.init_db()
+    return {"runs": store.list_runs(limit)}
 
 
 @app.get("/runs/{run_id}")
@@ -185,35 +342,179 @@ def get_run(run_id: str) -> dict[str, Any]:
     return {"run": run, "events": store.get_events(run_id)}
 
 
-@app.get("/runs/{run_id}/stream")
-def stream_run(run_id: str) -> StreamingResponse:
+@app.post("/runs/{run_id}/cancel")
+def cancel_run(run_id: str) -> dict[str, Any]:
+    """Stop a live run. Cooperative: checked between steps, never mid-write."""
     store.init_db()
     run = store.get_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="unknown run")
-    events = store.get_events(run_id)
+    if run["status"] in TERMINAL_STATUSES:
+        raise HTTPException(
+            status_code=409, detail=f"run already {run['status']}"
+        )
+    was_awaiting = run["status"] == "awaiting_approval"
+    handle = _CANCELS.get(run_id)
+    if handle is not None:
+        handle.set()
+    if not store.cancel_run(run_id):
+        current = store.get_run(run_id) or run
+        raise HTTPException(
+            status_code=409, detail=f"run already {current['status']}"
+        )
+    denied = _deny_pending_tickets(run_id)
+    ticket_note = " (cancelled by user)" if was_awaiting else ""
+    store.append_event(
+        run_id,
+        "cancelled",
+        f"cancelled: run stopped by user{ticket_note}",
+        {"reason": "cancelled by user", "tickets_denied": denied},
+    )
+    return {"run_id": run_id, "status": "cancelled", "tickets_denied": denied}
 
-    def _gen() -> Any:
-        for item in events:
-            yield f"data: {json.dumps(item)}\n\n"
 
-    return StreamingResponse(_gen(), media_type="text/event-stream")
+def _sse(payload: dict[str, Any], event_id: int | None = None) -> str:
+    head = f"id: {event_id}\n" if event_id is not None else ""
+    return f"{head}data: {json.dumps(payload)}\n\n"
+
+
+@app.get("/runs/{run_id}/stream")
+async def stream_run(run_id: str, request: Request) -> StreamingResponse:
+    """Tail the run. Replays from the start, or from Last-Event-ID."""
+    store.init_db()
+    run = store.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="unknown run")
+
+    cursor = request.headers.get("last-event-id") or request.query_params.get("after")
+    try:
+        last = int(cursor) if cursor not in (None, "") else -1
+    except ValueError:
+        last = -1
+
+    async def _gen() -> Any:
+        nonlocal last
+        sent_status: str | None = None
+        heartbeat = 0
+        while True:
+            if await request.is_disconnected():
+                return
+            events = await anyio.to_thread.run_sync(
+                lambda: store.get_events(run_id, after=last)
+            )
+            for item in events:
+                last = int(item["seq"])
+                yield _sse(item, event_id=last)
+            current = await anyio.to_thread.run_sync(store.get_run, run_id)
+            if current is None:
+                return
+            if current["status"] != sent_status:
+                sent_status = current["status"]
+                yield _sse(
+                    {
+                        "seq": last,
+                        "kind": "status",
+                        "body": f"status: {sent_status}",
+                        "data": {
+                            "status": sent_status,
+                            "step_count": current["step_count"],
+                        },
+                    }
+                )
+            if sent_status in TERMINAL_STATUSES:
+                return
+            if not events:
+                heartbeat += 1
+                if heartbeat % 75 == 0:  # ~15s of silence
+                    yield ": keep-alive\n\n"
+            await anyio.sleep(0.2)
+
+    return StreamingResponse(
+        _gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+def _gate(
+    ticket_id: str, approved: bool, decided_by: str, note: str
+) -> dict[str, Any]:
+    try:
+        ticket = store.decide_approval(ticket_id, approved, decided_by, note)
+    except store.AlreadyDecided:
+        raise HTTPException(
+            status_code=409, detail=f"ticket already decided: {ticket_id}"
+        ) from None
+    if ticket is None:
+        raise HTTPException(status_code=404, detail="unknown approval ticket")
+    return ticket
 
 
 @app.post("/approvals/{ticket_id}/decide")
 def decide(ticket_id: str, req: DecideRequest) -> dict[str, Any]:
     store.init_db()
-    ticket = store.decide_approval(ticket_id, req.approved)
+    ticket = store.get_approval(ticket_id)
     if ticket is None:
         raise HTTPException(status_code=404, detail="unknown approval ticket")
+    if ticket["decided"]:
+        raise HTTPException(
+            status_code=409, detail=f"ticket already decided: {ticket_id}"
+        )
+
     run_id = ticket["run_id"]
-    events = store.get_events(run_id)
-    history = [e["body"] for e in events]
+    run = store.get_run(run_id) or {}
+    if run.get("status") == "cancelled":
+        raise HTTPException(status_code=409, detail="run was cancelled")
+
     if not req.approved:
-        store.append_event(run_id, "denied", f"denied: {ticket_id}")
-        run = store.get_run(run_id) or {}
+        ticket = _gate(ticket_id, False, req.decided_by, req.note)
+        body = f"denied: {ticket_id} by {req.decided_by}"
+        if req.note:
+            body += f" ({req.note})"
+        store.append_event(
+            run_id,
+            "denied",
+            body,
+            {
+                "ticket_id": ticket_id,
+                "action": ticket["action"],
+                "decided_by": req.decided_by,
+                "note": req.note,
+            },
+        )
         store.set_run_status(run_id, "failed", int(run.get("step_count", 0)))
-        return {"ticket_id": ticket_id, "approved": False, "status": "failed"}
+        return {
+            "ticket_id": ticket_id,
+            "display_no": ticket["display_no"],
+            "run_id": run_id,
+            "approved": False,
+            "status": "failed",
+            "decided_by": req.decided_by,
+        }
+
+    if ticket["action"] != "ledger_write":
+        ticket = _gate(ticket_id, True, req.decided_by, req.note)
+        store.append_event(
+            run_id,
+            "approval",
+            f"approval: {ticket_id} granted by {req.decided_by}",
+            {
+                "ticket_id": ticket_id,
+                "action": ticket["action"],
+                "decided_by": req.decided_by,
+                "note": req.note,
+            },
+        )
+        store.set_run_status(run_id, "done", int(run.get("step_count", 0)))
+        return {
+            "ticket_id": ticket_id,
+            "display_no": ticket["display_no"],
+            "run_id": run_id,
+            "approved": True,
+            "status": "done",
+            "decided_by": req.decided_by,
+        }
+
     meta = ticket.get("meta") or {}
     try:
         args = LedgerArgs(
@@ -224,22 +525,78 @@ def decide(ticket_id: str, req: DecideRequest) -> dict[str, Any]:
         )
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"stored args invalid: {exc}")
-    ok, reason = assess_grounding(args, history)
+
+    packet = ticket.get("evidence") or {}
+    try:
+        evidence = [Evidence(**item) for item in packet.get("citations", [])]
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422, detail=f"stored evidence invalid: {exc}"
+        )
+    if not evidence:
+        raise HTTPException(
+            status_code=422,
+            detail="ticket has no evidence packet; re-run the task",
+        )
+
+    ok, reason = assess_grounding(args, evidence)
     if not ok:
         raise HTTPException(status_code=422, detail=reason)
     math_ok, math_reason = verify_ledger_math(args)
     if not math_ok:
         raise HTTPException(status_code=422, detail=math_reason)
-    receipt = f"ledger_write: {args.entry_id} {args.amount:.2f} {args.currency}"
-    store.insert_ledger_entry(
-        run_id, args.entry_id, args.amount, args.currency, args.source_doc
+    due_ok, due_reason = assess_due_amount(args, evidence)
+    if not due_ok:
+        raise HTTPException(status_code=422, detail=due_reason)
+    task = str(packet.get("task") or run.get("task") or "")
+    cited = "\n".join(
+        item.text for item in evidence if item.doc_id == args.source_doc
     )
-    store.append_event(run_id, "ledger_write", receipt)
-    run = store.get_run(run_id) or {}
+    period_ok, period_reason = period_compatible(task, cited)
+    if not period_ok:
+        raise HTTPException(status_code=422, detail=period_reason)
+
+    ticket = _gate(ticket_id, True, req.decided_by, req.note)
+    receipt = f"ledger_write: {args.source_doc} {args.amount:.2f} {args.currency}"
+    try:
+        store.insert_ledger_entry(
+            run_id, args.entry_id, args.amount, args.currency, args.source_doc
+        )
+    except store.DuplicateLedgerEntry:
+        raise HTTPException(
+            status_code=409,
+            detail=f"ledger entry already exists for run: {args.source_doc}",
+        )
+    store.append_event(
+        run_id,
+        "approval",
+        f"approval: {ticket_id} granted by {req.decided_by}",
+        {
+            "ticket_id": ticket_id,
+            "action": ticket["action"],
+            "decided_by": req.decided_by,
+            "note": req.note,
+        },
+    )
+    store.append_event(
+        run_id,
+        "ledger_write",
+        receipt,
+        {
+            "entry_id": args.entry_id,
+            "amount": args.amount,
+            "currency": args.currency,
+            "source_doc": args.source_doc,
+            "ticket_id": ticket_id,
+        },
+    )
     store.set_run_status(run_id, "done", int(run.get("step_count", 0)))
     return {
         "ticket_id": ticket_id,
+        "display_no": ticket["display_no"],
+        "run_id": run_id,
         "approved": True,
         "status": "done",
         "receipt": receipt,
+        "decided_by": req.decided_by,
     }

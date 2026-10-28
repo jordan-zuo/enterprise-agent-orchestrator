@@ -7,3 +7,4 @@ __pycache__/
 data/app.db
 data/*.db
 .tmp/
+data/archive/

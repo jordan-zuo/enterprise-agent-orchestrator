@@ -1,10 +1,12 @@
 import json
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 import scripts.api as api
 from agent import store
+from tests.helpers import wait_for_run
 
 
 class _ScriptedClient:
@@ -31,6 +33,13 @@ def isolated_db(tmp_path, monkeypatch):
     monkeypatch.setenv("APP_DB", str(tmp_path / "t.db"))
     store.init_db()
     yield str(tmp_path / "t.db")
+
+
+@pytest.fixture()
+def demo_corpus(monkeypatch):
+    monkeypatch.setenv(
+        "APP_CORPUS", str(Path(__file__).parent / "fixtures" / "corpus.json")
+    )
 
 
 def _quoted_flow() -> list[dict]:
@@ -65,28 +74,39 @@ def test_ui_and_corpus_endpoints(isolated_db) -> None:
     # Corpus
     res_corpus = client.get("/corpus")
     assert res_corpus.status_code == 200
-    assert "lease-7" in res_corpus.json()
+    assert set(res_corpus.json()) == {
+        "agl-better-bills-sample-bill-necf",
+        "aer---better-bills---illustrative-example-bill---paginated",
+        "origin-standing-bill-modified-alexcarter",
+    }
 
 
-def test_run_persists_quoted_write_and_replays(isolated_db, monkeypatch) -> None:
+def test_run_persists_quoted_write_and_replays(
+    isolated_db, demo_corpus, monkeypatch
+) -> None:
     monkeypatch.setattr(api, "TEST_CLIENT", _ScriptedClient(_quoted_flow()))
     client = TestClient(api.app)
-    res = client.post("/run", json={"task": "recon", "max_steps": 6})
-    assert res.status_code == 200, res.text
-    body = res.json()
-    assert body["status"] == "done"
-    assert any("ledger_write:" in e for e in body["history"])
-    run_id = body["run_id"]
+    started = client.post("/run", json={"task": "recon", "max_steps": 6})
+    assert started.status_code == 202, started.text
+    run_id = started.json()["run_id"]
+    assert started.json()["status"] == "running"
+
+    settled = wait_for_run(client, run_id)
+    assert settled["run"]["status"] == "done"
 
     replay = client.get(f"/runs/{run_id}")
     assert replay.status_code == 200
     events = replay.json()["events"]
     assert any("4049.18" in e["body"] for e in events)
+    assert any(e["kind"] == "decision" for e in events)
+    assert all(isinstance(e["data"], dict) for e in events)
+    assert any(e["kind"] == "retrieve" and e["data"].get("doc_ids") for e in events)
 
     stream = client.get(f"/runs/{run_id}/stream")
     assert stream.status_code == 200
     assert "text/event-stream" in stream.headers["content-type"]
     assert "4049.18" in stream.text
+    assert "id: 0" in stream.text
 
     ledger = client.get("/ledger").json()["entries"]
     assert any(e["entry_id"] == "lease-7-q3" for e in ledger)
@@ -108,3 +128,20 @@ def test_decide_deny_marks_failed(isolated_db) -> None:
     assert res.status_code == 200
     assert res.json()["status"] == "failed"
     assert store.get_run(run_id)["status"] == "failed"
+
+def test_reset_requires_confirm_and_archives(isolated_db) -> None:
+    run_id = store.create_run("reset-case")
+    store.insert_ledger_entry(run_id, "j-1", 10.0, "AUD", "bill")
+    client = TestClient(api.app)
+
+    assert client.post("/admin/reset", json={}).status_code == 400
+    assert client.post("/admin/reset", json={"confirm": False}).status_code == 400
+    assert len(client.get("/ledger").json()["entries"]) == 1
+
+    res = client.post("/admin/reset", json={"confirm": True})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["tables"]["ledger"] == 0
+    assert body["tables"]["runs"] == 0
+    assert Path(body["archived"]).exists()
+    assert client.get("/ledger").json()["entries"] == []

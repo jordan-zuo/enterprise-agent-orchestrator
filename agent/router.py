@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from agent.states import AgentState, StepDecision
 
-TERMINAL_STATES = ("done", "failed")
+TERMINAL_STATES = ("done", "failed", "cancelled")
 
 
 def route(state: AgentState, needs_approval: bool = False) -> StepDecision:

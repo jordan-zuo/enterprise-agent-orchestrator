@@ -159,6 +159,18 @@
       color: #FFFFFF;
     }
 
+    .pill-btn.armed {
+      background: var(--accent-rust);
+      color: #FFFFFF;
+      animation: reset-pulse 1.2s ease-in-out infinite;
+    }
+
+    @keyframes reset-pulse {
+      0%   { box-shadow: 0 0 0 0 rgba(184, 74, 74, 0.45); }
+      70%  { box-shadow: 0 0 0 8px rgba(184, 74, 74, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(184, 74, 74, 0); }
+    }
+
     /* Page Headline */
     .hero-title-section {
       display: flex;
@@ -493,6 +505,73 @@
       color: var(--accent-rust);
     }
 
+    .status-badge.cancelled {
+      background: #EFECE7;
+      color: var(--text-muted);
+    }
+
+    /* Recent Runs */
+    .run-list-container {
+      background: #FFFFFF;
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--border-card);
+      box-shadow: var(--shadow-soft);
+      margin-bottom: 20px;
+      overflow: hidden;
+    }
+
+    .run-list-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border-subtle);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      color: var(--text-muted);
+    }
+
+    table.run-table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+    }
+
+    table.run-table th {
+      background: #FAF8F5;
+      padding: 9px 16px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    table.run-table td {
+      padding: 10px 16px;
+      font-size: 13px;
+      border-bottom: 1px solid var(--border-subtle);
+      color: var(--text-main);
+    }
+
+    table.run-table tr:last-child td {
+      border-bottom: none;
+    }
+
+    table.run-table tr:hover td {
+      background: #FDFBF8;
+    }
+
+    .run-task-cell {
+      max-width: 420px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
     @keyframes pulse {
       0% { opacity: 1; }
       50% { opacity: 0.65; }
@@ -620,6 +699,7 @@
     .ticket-meta-row {
       display: flex;
       justify-content: space-between;
+      gap: 12px;
       font-size: 13px;
       margin-bottom: 8px;
     }
@@ -637,6 +717,7 @@
       font-family: var(--font-mono);
       font-weight: 600;
       color: var(--text-main);
+      text-align: right;
     }
 
     .ticket-actions {
@@ -781,6 +862,96 @@
     }
 
     /* Responsive */
+    .toast-stack {
+      position: fixed;
+      right: 24px;
+      bottom: 24px;
+      z-index: 999;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      max-width: 380px;
+      pointer-events: none;
+    }
+
+    .toast {
+      pointer-events: auto;
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 12px 14px;
+      border-radius: var(--radius-sm);
+      border-left: 4px solid var(--text-light);
+      background: var(--bg-card);
+      box-shadow: var(--shadow-float);
+      border-top: 1px solid var(--border-subtle);
+      border-right: 1px solid var(--border-subtle);
+      border-bottom: 1px solid var(--border-subtle);
+      font-size: 13px;
+      line-height: 1.45;
+      color: var(--text-main);
+      cursor: pointer;
+      animation: toast-in 160ms ease-out;
+    }
+
+    .toast.ok {
+      border-left-color: var(--accent-sage);
+      background: var(--accent-sage-bg);
+    }
+
+    .toast.bad {
+      border-left-color: var(--accent-rust);
+      background: var(--accent-rust-bg);
+    }
+
+    .toast .toast-close {
+      margin-left: auto;
+      border: none;
+      background: transparent;
+      color: var(--text-light);
+      font-size: 15px;
+      line-height: 1;
+      cursor: pointer;
+      padding: 0 2px;
+    }
+
+    .chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .evidence-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      border-radius: var(--radius-pill);
+      font-family: var(--font-mono);
+      font-size: 10.5px;
+      letter-spacing: 0.01em;
+      background: var(--bg-card-tint);
+      color: var(--text-muted);
+      border: 1px solid var(--border-subtle);
+    }
+
+    .evidence-chip.amount {
+      background: var(--accent-camel-bg);
+      color: var(--accent-camel);
+      font-weight: 700;
+    }
+
+    .evidence-chip.doc {
+      background: var(--accent-sage-bg);
+      color: var(--accent-sage);
+    }
+
+    @keyframes toast-in {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
     @media (max-width: 980px) {
       .bento-grid {
         grid-template-columns: 1fr;
@@ -792,6 +963,11 @@
       }
       .run-stream-grid {
         grid-template-columns: 1fr;
+      }
+      .toast-stack {
+        left: 16px;
+        right: 16px;
+        max-width: none;
       }
     }
   </style>
@@ -843,21 +1019,21 @@
             <textarea
               id="task-input"
               class="task-textarea"
-              placeholder="e.g. Reconcile the electricity bill against lease-7 and post it."
-            >Reconcile the electricity bill against lease-7 and post it.</textarea>
+              placeholder="e.g. Reconcile the AGL sample bill and post the amount due."
+            >Reconcile the AGL sample bill and post the amount due.</textarea>
           </div>
           <div class="quick-pill-group">
-            <button class="quick-pill" onclick="setTask('Reconcile the electricity bill against lease-7 and post it.')">
-              Lease-7 electricity bill
+            <button class="quick-pill" onclick="setTask('Reconcile the AGL sample bill and post the amount due.')">
+              AGL sample bill
             </button>
             <button class="quick-pill" onclick="setTask('which account had 463 kWh solar exports also find their name')">
               Solar exports and customer
             </button>
-            <button class="quick-pill" onclick="setTask('Reconcile the high-capacity plant equipment invoice for 75000 AUD against supplier contract.')">
-              High-value invoice (&gt; $10k)
+            <button class="quick-pill" onclick="setTask('Retrieve the Origin standing bill and post its total amount due to the ledger.')">
+              Origin bill (&gt; $10k)
             </button>
-            <button class="quick-pill" onclick="setTask('Reconcile the Q3 water bill for account 99881.')">
-              Q3 water bill
+            <button class="quick-pill" onclick="setTask('Compare the amount due on all three bills and tell me which is highest.')">
+              Compare bill totals
             </button>
           </div>
         </div>
@@ -949,6 +1125,33 @@
       </div>
     </div>
 
+    <div class="run-list-container">
+      <div class="run-list-head">
+        <span>Recent Runs</span>
+        <button class="pill-btn light" style="padding: 4px 10px; font-size: 11px;" onclick="loadRuns()">
+          Refresh
+        </button>
+      </div>
+      <table class="run-table">
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th>Task</th>
+            <th>Steps</th>
+            <th>Started</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="run-list-body">
+          <tr>
+            <td colspan="5" style="text-align: center; padding: 18px; color: var(--text-muted);">
+              Loading runs...
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
     <div class="run-stream-grid">
       <!-- Event Log Feed -->
       <div class="stream-feed-card">
@@ -957,8 +1160,13 @@
             <span id="current-run-id" style="font-family: var(--font-mono); font-size: 13px; font-weight: 700;">No active run</span>
             <span id="current-run-badge" class="status-badge" style="display: none;">pending</span>
           </div>
-          <div id="step-counter" style="font-size: 13px; font-weight: 600; color: var(--text-muted);">
-            Steps: 0/6
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <div id="step-counter" style="font-size: 13px; font-weight: 600; color: var(--text-muted);">
+              Steps: 0/6
+            </div>
+            <button id="cancel-run-btn" class="pill-btn danger" style="display: none; padding: 5px 12px; font-size: 12px;" onclick="cancelActiveRun()">
+              Cancel run
+            </button>
           </div>
         </div>
         <div class="timeline-list" id="events-timeline">
@@ -994,19 +1202,23 @@
         <h2 class="section-title">Financial Ledger</h2>
         <div style="font-size: 13.5px; color: var(--text-muted);">Recorded transactions and supporting documents.</div>
       </div>
-      <button class="pill-btn light" onclick="refreshLedger()">
-        Refresh
-      </button>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <button class="pill-btn danger" id="reset-ledger-btn" onclick="resetLedger()">
+          Clear ledger
+        </button>
+        <button class="pill-btn light" onclick="refreshLedger()">
+          Refresh
+        </button>
+      </div>
     </div>
 
     <div class="ledger-container">
       <table class="ledger-table">
         <thead>
           <tr>
-            <th>Entry ID</th>
+            <th>Source Document</th>
             <th>Amount</th>
             <th>Currency</th>
-            <th>Source Document</th>
             <th>Run ID</th>
           </tr>
         </thead>
@@ -1039,11 +1251,76 @@
   <script>
     // State management
     let activeRunId = null;
+    let activeRunStatus = null;
     let sseSource = null;
+    let sseRunId = null;
+    let renderedSteps = 0;
 
     function setTask(text) {
       document.getElementById('task-input').value = text;
       document.getElementById('task-input').focus();
+    }
+
+    function newRequestId() {
+      if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+      return `req-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    }
+
+    function describeCheck(key, value, allChecks) {
+      const raw = String(value || '');
+      const failed = raw.startsWith('failed:');
+      const reason = raw.replace(/^failed:\s*/, '');
+      if (key === 'grounding') {
+        return failed
+          ? { text: `Source quote: ${reason}`, warn: true }
+          : { text: 'Source quote: the amount appears in the cited document.', warn: false };
+      }
+      if (key === 'math') {
+        if (raw.includes('no known math')) {
+          const dueChecked = String((allChecks || {}).amount_due || '').includes('matches the');
+          return {
+            text: 'Arithmetic: not recomputed for this document.',
+            warn: !dueChecked,
+          };
+        }
+        return failed
+          ? { text: `Arithmetic: ${reason}`, warn: true }
+          : { text: 'Arithmetic: matches the recomputed bill total.', warn: false };
+      }
+      if (key === 'amount_due') {
+        if (raw.includes('no stated amount due')) {
+          return {
+            text: 'Amount due: the document names no payable figure, so the quoted total is used.',
+            warn: true,
+          };
+        }
+        return failed
+          ? { text: `Amount due: ${reason}`, warn: true }
+          : { text: 'Amount due: matches the figure the document says is payable.', warn: false };
+      }
+      if (key === 'period') {
+        if (raw.includes('no explicit period')) {
+          return {
+            text: 'Period: the task names no month or quarter, so there is no period restriction.',
+            warn: false,
+          };
+        }
+        return failed
+          ? { text: `Period: ${reason}`, warn: true }
+          : { text: 'Period: the bill period matches the task.', warn: false };
+      }
+      if (key === 'gate') {
+        return { text: 'Approval: waiting for a human decision.', warn: false };
+      }
+      return { text: `${key}: ${raw}`, warn: failed };
+    }
+
+    function describeDetail(ticket) {
+      const detail = String(ticket.detail || '');
+      if (detail.includes('exceeds approval threshold')) {
+        return 'The amount is above the $10,000 approval limit, so a human needs to sign off.';
+      }
+      return detail;
     }
 
     async function executeRun() {
@@ -1055,15 +1332,14 @@
       btn.disabled = true;
       btn.innerText = 'Routing...';
 
-      // Reset Timeline
-      const timeline = document.getElementById('events-timeline');
-      timeline.innerHTML = '<div style="text-align: center; padding: 24px; color: var(--text-muted);">Opening run record & starting model graph...</div>';
+      clearTimeline('Opening run record...');
+      document.getElementById('step-counter').innerText = `Steps: 0/${maxSteps}`;
 
       try {
         const res = await fetch('/run', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ task, max_steps: maxSteps })
+          body: JSON.stringify({ task, max_steps: maxSteps, request_id: newRequestId() })
         });
 
         if (!res.ok) {
@@ -1072,70 +1348,321 @@
         }
 
         const data = await res.json();
-        activeRunId = data.run_id;
-        document.getElementById('current-run-id').innerText = data.run_id;
-        updateStatusBadge(data.status);
-        document.getElementById('step-counter').innerText = `Steps: ${data.steps}/${maxSteps}`;
-
-        renderHistory(data.history);
-        checkPendingApprovals();
-        refreshLedger();
+        if (data.replayed) {
+          notify('This request already has a run. Reattached to it.', 'ok');
+        }
+        await attachRun(data.run_id);
       } catch (e) {
-        timeline.innerHTML = `<div style="padding: 16px; background: var(--accent-rust-bg); color: var(--accent-rust); border-radius: var(--radius-md);">Error: ${e.message}</div>`;
+        clearTimeline();
+        const timeline = document.getElementById('events-timeline');
+        timeline.innerHTML = `<div style="padding: 16px; background: var(--accent-rust-bg); color: var(--accent-rust); border-radius: var(--radius-md);">Error: ${escapeHtml(e.message)}</div>`;
       } finally {
         btn.disabled = false;
-        btn.innerText = 'Execute Run ↗';
+        btn.innerText = 'Run Task';
       }
     }
 
-    function renderHistory(history) {
+    const EVENT_LABELS = {
+      retrieve: ['retrieve', 'retrieve'],
+      ledger_write: ['ledger write', 'ledger_write'],
+      gated: ['approval gate', 'gated'],
+      rejected: ['rejected', 'rejected'],
+      approval: ['approval', ''],
+      denied: ['denied', 'rejected'],
+      cancelled: ['cancelled', 'rejected'],
+      error: ['error', 'rejected'],
+      finish: ['finish', ''],
+      decision: ['decision', ''],
+      step: ['step', ''],
+      note: ['note', '']
+    };
+
+    function clearTimeline(message) {
+      renderedSteps = 0;
       const timeline = document.getElementById('events-timeline');
-      if (!history || history.length === 0) {
-        timeline.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-light);">No events logged for this run.</div>';
+      if (!message) {
+        timeline.innerHTML = '';
         return;
       }
+      timeline.innerHTML = `<div style="text-align: center; padding: 24px; color: var(--text-muted);">${escapeHtml(message)}</div>`;
+    }
 
-      timeline.innerHTML = '';
-      history.forEach((event, index) => {
-        const el = document.createElement('div');
-        el.className = 'event-item';
-
-        let kind = 'step';
-        let kindClass = '';
-        if (event.startsWith('retrieve')) {
-          kind = 'retrieve';
-          kindClass = 'retrieve';
-        } else if (event.startsWith('ledger_write')) {
-          kind = 'ledger write';
-          kindClass = 'ledger_write';
-        } else if (event.startsWith('gated')) {
-          kind = 'approval gate';
-          kindClass = 'gated';
-        } else if (event.startsWith('rejected')) {
-          kind = 'rejected';
-          kindClass = 'rejected';
-        } else if (event.startsWith('finish')) {
-          kind = 'finish';
+    function chipsFor(event) {
+      const data = event.data || {};
+      const chips = [];
+      if (event.kind === 'retrieve') {
+        (data.doc_ids || []).forEach(id => chips.push(`<span class="evidence-chip doc">${escapeHtml(id)}</span>`));
+      }
+      if (event.kind === 'ledger_write' || event.kind === 'gated') {
+        if (data.amount !== undefined && data.amount !== null) {
+          chips.push(`<span class="evidence-chip amount">${Number(data.amount).toFixed(2)} ${escapeHtml(data.currency || 'AUD')}</span>`);
         }
+        if (data.source_doc) {
+          chips.push(`<span class="evidence-chip doc">${escapeHtml(data.source_doc)}</span>`);
+        }
+        if (data.threshold) {
+          chips.push(`<span class="evidence-chip">limit ${Number(data.threshold).toLocaleString()}</span>`);
+        }
+      }
+      if (event.kind === 'gated' && data.ticket_id) {
+        chips.push(`<span class="evidence-chip">${escapeHtml(data.ticket_id)}</span>`);
+      }
+      return chips.length ? `<div class="chip-row">${chips.join('')}</div>` : '';
+    }
 
-        el.innerHTML = `
-          <div class="event-seq">${index + 1}</div>
-          <div class="event-body">
-            <div class="event-top">
-              <span class="event-kind-tag ${kindClass}">${kind}</span>
-            </div>
-            <div class="event-text">${escapeHtml(event)}</div>
+    function appendEvent(event) {
+      if (event.kind === 'decision') return;
+      const timeline = document.getElementById('events-timeline');
+      if (!timeline) return;
+      const placeholder = timeline.querySelector('div[style*="padding: 24px"]');
+      if (placeholder) timeline.innerHTML = '';
+
+      const [label, kindClass] = EVENT_LABELS[event.kind] || [event.kind, ''];
+      const el = document.createElement('div');
+      el.className = 'event-item';
+      renderedSteps += 1;
+      const seq = renderedSteps;
+      el.innerHTML = `
+        <div class="event-seq">${seq}</div>
+        <div class="event-body">
+          <div class="event-top">
+            <span class="event-kind-tag ${kindClass}">${escapeHtml(label)}</span>
           </div>
-        `;
-        timeline.appendChild(el);
-      });
+          <div class="event-text">${escapeHtml(event.body)}</div>
+          ${chipsFor(event)}
+        </div>
+      `;
+      timeline.appendChild(el);
+      timeline.scrollTop = timeline.scrollHeight;
+    }
+
+    function subscribeRun(runId, after = null) {
+      if (sseSource) {
+        sseSource.close();
+        sseSource = null;
+      }
+      sseRunId = runId;
+      const suffix = after === null || after === undefined ? '' : `?after=${after}`;
+      sseSource = new EventSource(`/runs/${runId}/stream${suffix}`);
+      sseSource.onmessage = (msg) => {
+        let event;
+        try {
+          event = JSON.parse(msg.data);
+        } catch (e) {
+          return;
+        }
+        if (event.kind === 'status') {
+          const data = event.data || {};
+          activeRunStatus = data.status;
+          updateStatusBadge(data.status);
+          toggleCancelButton();
+          document.getElementById('step-counter').innerText =
+            `Steps: ${data.step_count}`;
+          if (data.status === 'awaiting_approval') {
+            checkPendingApprovals();
+            refreshLedger();
+          }
+          if (data.status === 'done' || data.status === 'failed' || data.status === 'cancelled') {
+            checkPendingApprovals();
+            refreshLedger();
+            sseSource.close();
+            sseSource = null;
+            sseRunId = null;
+          }
+          loadRuns();
+          return;
+        }
+        if (event.kind === 'gated') checkPendingApprovals();
+        if (event.kind === 'ledger_write') refreshLedger();
+        appendEvent(event);
+      };
+      sseSource.onerror = () => {
+        // The browser reconnects with Last-Event-ID; nothing to do unless
+        // the stream is closed, in which case a reload shows the replay.
+      };
     }
 
     function updateStatusBadge(status) {
       const badge = document.getElementById('current-run-badge');
+      if (!status) {
+        badge.style.display = 'none';
+        return;
+      }
       badge.style.display = 'inline-flex';
       badge.className = `status-badge ${status}`;
       badge.innerText = status.replace('_', ' ');
+    }
+
+    function toggleCancelButton() {
+      const btn = document.getElementById('cancel-run-btn');
+      if (!btn) return;
+      const live = activeRunStatus === 'running' || activeRunStatus === 'awaiting_approval';
+      btn.style.display = live ? 'inline-flex' : 'none';
+    }
+
+    function formatStarted(iso) {
+      if (!iso) return '';
+      const when = new Date(iso);
+      if (Number.isNaN(when.getTime())) return iso;
+      return when.toLocaleString([], {
+        month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+      });
+    }
+
+    async function loadRuns() {
+      const tbody = document.getElementById('run-list-body');
+      if (!tbody) return [];
+      try {
+        const res = await fetch('/runs?limit=10');
+        const data = await res.json();
+        const runs = data.runs || [];
+        if (!runs.length) {
+          tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; padding: 18px; color: var(--text-muted);">No runs yet.</td></tr>`;
+          return runs;
+        }
+        tbody.innerHTML = '';
+        runs.forEach(run => {
+          const tr = document.createElement('tr');
+          const task = String(run.task || '');
+          const shown = task.length > 90 ? task.slice(0, 90) + '...' : task;
+          tr.innerHTML = `
+            <td><span class="status-badge ${escapeHtml(run.status)}" style="font-size: 10px; padding: 3px 8px;">${escapeHtml(String(run.status).replace('_', ' '))}</span></td>
+            <td class="run-task-cell" title="${escapeHtml(task)}">${escapeHtml(shown)}</td>
+            <td style="font-family: var(--font-mono); font-size: 12px;">${Number(run.step_count) || 0}</td>
+            <td style="font-size: 12px; color: var(--text-muted);">${escapeHtml(formatStarted(run.created_at))}</td>
+            <td style="text-align: right;">
+              <button class="pill-btn light" style="padding: 4px 10px; font-size: 11px;" onclick="attachRun('${escapeHtml(run.run_id)}')">
+                Open
+              </button>
+            </td>
+          `;
+          tbody.appendChild(tr);
+        });
+        return runs;
+      } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--accent-rust);">Failed to load runs: ${escapeHtml(e.message)}</td></tr>`;
+        return [];
+      }
+    }
+
+    async function attachRun(runId) {
+      try {
+        const res = await fetch(`/runs/${runId}`);
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.detail || res.status);
+        }
+        const data = await res.json();
+        const run = data.run;
+        const events = data.events || [];
+        if (sseSource) {
+          sseSource.close();
+          sseSource = null;
+        }
+        sseRunId = null;
+        activeRunId = run.run_id;
+        activeRunStatus = run.status;
+        document.getElementById('current-run-id').innerText = run.run_id;
+        updateStatusBadge(run.status);
+        toggleCancelButton();
+        document.getElementById('step-counter').innerText = `Steps: ${run.step_count}`;
+        renderedSteps = 0;
+        clearTimeline(events.length ? '' : 'Run attached. Waiting for the next step...');
+        events.forEach(appendEvent);
+        // Subscribe after the last event we already rendered; a terminal run
+        // gets one final status event and the stream closes.
+        const lastSeq = events.length ? Number(events[events.length - 1].seq) : -1;
+        subscribeRun(run.run_id, lastSeq);
+        checkPendingApprovals();
+        refreshLedger();
+        loadRuns();
+      } catch (e) {
+        notify('Failed to open run: ' + e.message, 'bad');
+      }
+    }
+
+    async function cancelActiveRun() {
+      if (!activeRunId) return;
+      const runId = activeRunId;
+      try {
+        const res = await fetch(`/runs/${runId}/cancel`, { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) {
+          notify(data.detail || `Cancel failed (${res.status})`, 'bad');
+          loadRuns();
+          return;
+        }
+        notify('Run cancelled. No further steps will execute.', 'bad');
+        loadRuns();
+      } catch (e) {
+        notify('Cancel failed: ' + e.message, 'bad');
+      }
+    }
+
+    function ticketCardHtml(ticket) {
+      const packet = ticket.evidence || {};
+      const checks = packet.checks || {};
+      const citations = packet.citations || [];
+      const checkItems = Object.entries(checks)
+        .map(([key, value]) => {
+          const described = describeCheck(key, value, checks);
+          return `<li style="margin: 3px 0; color: ${described.warn ? 'var(--accent-rust)' : 'var(--text-muted)'};">${described.warn ? '!' : '✓'} ${escapeHtml(described.text)}</li>`;
+        })
+        .join('');
+      const hasPacket = Object.keys(packet).length > 0;
+      const citationHtml = citations.length
+        ? citations.map(c => `
+            <div style="font-size: 11px; background: rgba(0,0,0,0.04); border-radius: 6px; padding: 6px 8px; margin-top: 4px;">
+              <strong>${escapeHtml(c.doc_id)}</strong><br>
+              ${escapeHtml(String(c.text || '').slice(0, 240))}${String(c.text || '').length > 240 ? '…' : ''}
+            </div>`).join('')
+        : (hasPacket
+            ? '<div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">No documents cited for this request.</div>'
+            : '<div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">No evidence packet recorded (legacy ticket).</div>');
+
+      return `
+        <div style="font-weight: 800; font-size: 14px; margin-bottom: 8px;">
+          ${ticket.display_no ? `Ticket #${escapeHtml(ticket.display_no)}` : 'Ticket'}
+        </div>
+        <div class="ticket-meta-row">
+          <span class="ticket-meta-label">Run:</span>
+          <span class="ticket-meta-val">${escapeHtml(ticket.run_id)}</span>
+        </div>
+        <div class="ticket-meta-row">
+          <span class="ticket-meta-label">Action:</span>
+          <span class="ticket-meta-val">${escapeHtml(ticket.action)}</span>
+        </div>
+        <div class="ticket-meta-row">
+          <span class="ticket-meta-label">Amount:</span>
+          <span class="ticket-meta-val" style="color: var(--accent-rust);">${ticket.meta && ticket.meta.amount ? Number(ticket.meta.amount).toFixed(2) + ' ' + escapeHtml(ticket.meta.currency || 'AUD') : 'N/A'}</span>
+        </div>
+        <div class="ticket-meta-row">
+          <span class="ticket-meta-label">Source Doc:</span>
+          <span class="ticket-meta-val">${escapeHtml(ticket.meta && ticket.meta.source_doc ? ticket.meta.source_doc : 'N/A')}</span>
+        </div>
+        ${packet.task ? `
+        <div class="ticket-meta-row">
+          <span class="ticket-meta-label">Task:</span>
+          <span class="ticket-meta-val">${escapeHtml(packet.task)}</span>
+        </div>` : ''}
+        <div style="font-size: 12px; color: var(--text-muted); margin: 10px 0;">
+          ${escapeHtml(describeDetail(ticket))}
+        </div>
+        ${checkItems ? `
+          <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-light); margin-top: 8px;">Checks</div>
+          <ul style="margin: 2px 0 8px; padding-left: 16px; font-size: 12px; line-height: 1.45;">${checkItems}</ul>
+        ` : ''}
+        <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-light); margin-top: 8px;">Evidence</div>
+        ${citationHtml}
+        <div class="ticket-actions">
+          <button class="pill-btn danger" style="padding: 6px 12px; font-size: 12px;" onclick="decideTicket('${escapeHtml(ticket.ticket_id)}', false, ${Number(ticket.display_no) || 0})">
+            Deny
+          </button>
+          <button class="pill-btn camel" style="padding: 6px 12px; font-size: 12px;" onclick="decideTicket('${escapeHtml(ticket.ticket_id)}', true, ${Number(ticket.display_no) || 0})">
+            Approve
+          </button>
+        </div>
+      `;
     }
 
     async function checkPendingApprovals() {
@@ -1156,32 +1683,8 @@
         data.pending.forEach(ticket => {
           const div = document.createElement('div');
           div.className = 'ticket-details-box';
-          div.innerHTML = `
-            <div style="font-weight: 800; font-size: 14px; margin-bottom: 8px;">Ticket ${ticket.ticket_id}</div>
-            <div class="ticket-meta-row">
-              <span class="ticket-meta-label">Action:</span>
-              <span class="ticket-meta-val">${ticket.action}</span>
-            </div>
-            <div class="ticket-meta-row">
-              <span class="ticket-meta-label">Amount:</span>
-              <span class="ticket-meta-val" style="color: var(--accent-rust);">${ticket.meta.amount ? Number(ticket.meta.amount).toFixed(2) + ' ' + (ticket.meta.currency || 'AUD') : 'N/A'}</span>
-            </div>
-            <div class="ticket-meta-row">
-              <span class="ticket-meta-label">Source Doc:</span>
-              <span class="ticket-meta-val">${ticket.meta.source_doc || 'N/A'}</span>
-            </div>
-            <div style="font-size: 12px; color: var(--text-muted); margin: 10px 0;">
-              ${ticket.detail}
-            </div>
-            <div class="ticket-actions">
-              <button class="pill-btn danger" style="padding: 6px 12px; font-size: 12px;" onclick="decideTicket('${ticket.ticket_id}', false)">
-                Deny
-              </button>
-              <button class="pill-btn camel" style="padding: 6px 12px; font-size: 12px;" onclick="decideTicket('${ticket.ticket_id}', true)">
-                Approve Write
-              </button>
-            </div>
-          `;
+          div.dataset.ticketId = ticket.ticket_id;
+          div.innerHTML = ticketCardHtml(ticket);
           container.appendChild(div);
         });
       } catch (e) {
@@ -1189,26 +1692,116 @@
       }
     }
 
-    async function decideTicket(ticketId, approved) {
+    function notify(message, kind = 'ok') {
+      const stack = document.getElementById('toast-stack');
+      if (!stack) return;
+      const toast = document.createElement('div');
+      toast.className = `toast ${kind}`;
+      const text = document.createElement('div');
+      text.innerText = message;
+      const close = document.createElement('button');
+      close.className = 'toast-close';
+      close.innerText = '×';
+      close.setAttribute('aria-label', 'Dismiss');
+      const remove = () => toast.remove();
+      close.addEventListener('click', (e) => {
+        e.stopPropagation();
+        remove();
+      });
+      toast.addEventListener('click', remove);
+      toast.appendChild(text);
+      toast.appendChild(close);
+      stack.appendChild(toast);
+      setTimeout(remove, kind === 'bad' ? 9000 : 6000);
+    }
+
+    async function decideTicket(ticketId, approved, displayNo = 0) {
+      const label = displayNo ? `Ticket #${displayNo}` : 'Ticket';
       try {
         const res = await fetch(`/approvals/${ticketId}/decide`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ approved })
+          body: JSON.stringify({ approved, decided_by: 'web-ui' })
         });
         const data = await res.json();
-        alert(`Ticket ${ticketId} ${approved ? 'Approved & Posted' : 'Denied'}`);
+        const resolvedLabel = data.display_no ? `Ticket #${data.display_no}` : label;
+        if (!res.ok) {
+          notify(`${resolvedLabel} not accepted: ${data.detail || res.status}`, 'bad');
+          checkPendingApprovals();
+          return;
+        }
+        const outcome = approved
+          ? (data.receipt ? `Approved and posted. ${data.receipt}` : 'Approved.')
+          : 'Denied. Nothing was written to the ledger.';
+        notify(`${resolvedLabel} ${outcome}`, approved ? 'ok' : 'bad');
+        // Follow the run this ticket belonged to, not whatever run was
+        // last submitted in this tab. If the stream is already open on it,
+        // the approval events arrive the same way any other step does.
+        if (data.run_id) {
+          activeRunId = data.run_id;
+          document.getElementById('current-run-id').innerText = activeRunId;
+          if (sseRunId !== activeRunId) subscribeRun(activeRunId);
+        }
         checkPendingApprovals();
         refreshLedger();
-        if (activeRunId) {
-          // Re-fetch current run details
-          const runRes = await fetch(`/runs/${activeRunId}`);
-          const runData = await runRes.json();
-          renderHistory(runData.events.map(e => e.body));
-          updateStatusBadge(runData.run.status);
-        }
+        loadRuns();
       } catch (e) {
-        alert('Failed to decide ticket: ' + e.message);
+        notify('Failed to decide ticket: ' + e.message, 'bad');
+      }
+    }
+
+    let resetArmed = false;
+    let resetTimer = null;
+
+    function disarmReset() {
+      resetArmed = false;
+      if (resetTimer) clearTimeout(resetTimer);
+      resetTimer = null;
+      const btn = document.getElementById('reset-ledger-btn');
+      if (!btn) return;
+      btn.innerText = 'Clear ledger';
+      btn.classList.remove('armed');
+    }
+
+    async function resetLedger() {
+      const btn = document.getElementById('reset-ledger-btn');
+      if (!resetArmed) {
+        resetArmed = true;
+        btn.innerText = 'Click again to clear (keeps an archive copy)';
+        btn.classList.add('armed');
+        resetTimer = setTimeout(disarmReset, 8000);
+        return;
+      }
+      disarmReset();
+      btn.disabled = true;
+      try {
+        const res = await fetch('/admin/reset', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ confirm: true })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || res.status);
+        notify(`Ledger cleared. The previous database was archived to ${data.archived}`, 'bad');
+        if (sseSource) {
+          sseSource.close();
+          sseSource = null;
+          sseRunId = null;
+        }
+        activeRunId = null;
+        activeRunStatus = null;
+        document.getElementById('current-run-id').innerText = 'No active run';
+        document.getElementById('current-run-badge').style.display = 'none';
+        document.getElementById('step-counter').innerText = 'Steps: 0/0';
+        toggleCancelButton();
+        clearTimeline('Ledger cleared. Start a run to post a bill.');
+        refreshLedger();
+        checkPendingApprovals();
+        loadRuns();
+      } catch (e) {
+        notify('Reset failed: ' + e.message, 'bad');
+      } finally {
+        btn.disabled = false;
       }
     }
 
@@ -1218,24 +1811,26 @@
         const res = await fetch('/ledger');
         const data = await res.json();
         if (!data.entries || data.entries.length === 0) {
-          tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; padding: 24px; color: var(--text-muted);">No entries posted to ledger yet.</td></tr>`;
+          tbody.innerHTML = `<tr><td colspan="4" style="text-align: center; padding: 24px; color: var(--text-muted);">No entries posted to ledger yet.</td></tr>`;
           return;
         }
 
         tbody.innerHTML = '';
         data.entries.forEach(entry => {
           const tr = document.createElement('tr');
+          const repeat = entry.duplicate
+            ? `<span class="evidence-chip" style="background: var(--accent-rust-bg); color: var(--accent-rust); margin-left: 6px;">repeat posting</span>`
+            : '';
           tr.innerHTML = `
-            <td style="font-weight: 700;">${entry.entry_id}</td>
+            <td><span class="doc-pill">${escapeHtml(entry.source_doc)}</span>${repeat}</td>
             <td class="amount-cell">${Number(entry.amount).toFixed(2)}</td>
-            <td style="font-weight: 600;">${entry.currency}</td>
-            <td><span class="doc-pill">${entry.source_doc}</span></td>
-            <td><code style="font-family: var(--font-mono); font-size: 12px; color: var(--text-muted);">${entry.run_id}</code></td>
+            <td style="font-weight: 600;">${escapeHtml(entry.currency)}</td>
+            <td><code style="font-family: var(--font-mono); font-size: 12px; color: var(--text-muted);">${escapeHtml(entry.run_id)}</code></td>
           `;
           tbody.appendChild(tr);
         });
       } catch (e) {
-        tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--accent-rust);">Failed to load ledger: ${e.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--accent-rust);">Failed to load ledger: ${e.message}</td></tr>`;
       }
     }
 
@@ -1269,21 +1864,25 @@
       document.getElementById('corpus-modal').classList.remove('open');
     }
 
-    function escapeHtml(str) {
-      if (!str) return '';
-      return str
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
     }
 
-    // Auto-load ledger and approvals on page load
-    window.addEventListener('DOMContentLoaded', () => {
+    // Auto-load ledger and approvals on page load, then reattach to a live run
+    // so a reload resumes the same timeline.
+    window.addEventListener('DOMContentLoaded', async () => {
       refreshLedger();
       checkPendingApprovals();
+      const runs = await loadRuns();
+      const live = runs.find(r => r.status === 'running' || r.status === 'awaiting_approval');
+      if (live) attachRun(live.run_id);
     });
   </script>
+  <div class="toast-stack" id="toast-stack"></div>
 </body>
 </html>

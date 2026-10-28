@@ -81,3 +81,4 @@ def test_prompt_carries_tool_catalog() -> None:
     prompt = _prompt_for(AgentState(task="t"), context="Documents [lease-7]. Ledger rules: positive.")
     assert "lease-7" in prompt
     assert "never SQL" in prompt
+    assert "still call ledger_write" in prompt

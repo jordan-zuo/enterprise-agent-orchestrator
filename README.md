@@ -2,7 +2,9 @@
 
 Hand-rolled state graph for tool-using workflows. Typed Pydantic state, pure routing function, hard step ceiling, fail-loud tool errors, and a human approval gate for sensitive operations. No agent framework dependency.
 
-Status: state graph core with termination guarantee. Tools, guardrails, and the scenario eval suite land in follow-up milestones.
+Status: working demo. Live run streaming, run list with reload reattach and cancel, request-id idempotency, evidence-backed ledger writes, human approvals, duplicate-posting guard, and an archive-first ledger reset. 88 tests, deterministic eval 14/14.
+
+See [HANDOFF.md](HANDOFF.md) for architecture, guarantees, known gaps, and the remaining phases.
 
 ## Run
 

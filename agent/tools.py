@@ -1,12 +1,21 @@
 from __future__ import annotations
 
 import re
+from typing import Callable
 
 from pydantic import BaseModel, Field, field_validator
 
-from agent.states import AgentState
+from agent.states import AgentState, Evidence
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+# A bill posting exists to quote this figure, so its window is selected ahead
+# of keyword hits and cannot be pushed out by the document header.
+_DUE_FIGURE_RE = re.compile(
+    r"(?:total\s+amount\s+due|amount\s+due|total\s+due|balance\s+due|amount\s+payable)"
+    r"[^0-9$]{0,30}?(\$\s*)?([0-9][0-9,]*(?:\.[0-9]{2})?)",
+    re.IGNORECASE,
+)
 
 
 _SYNONYMS = {
@@ -70,7 +79,7 @@ class RetrievalTool:
         ids = ", ".join(sorted(self._documents))
         return f"keyword search over documents [{ids}]. Ask with plain words. Returns id plus text snippet with numbers."
 
-    def _snippet(self, text: str, query: str = "", limit: int = 520) -> str:
+    def _snippet(self, text: str, query: str = "", limit: int = 700) -> str:
         cleaned = " ".join(text.split())
         if len(cleaned) <= limit:
             return cleaned
@@ -100,11 +109,17 @@ class RetrievalTool:
 
         for anchor in ("account number", "name", "customer", "tenant"):
             for m in re.finditer(rf"\b{re.escape(anchor)}\b", low):
-                matches.append((m.start(), m.end(), 8, 30, 100))
+                matches.append((m.start(), m.end(), 15, 30, 100))
 
         for anchor in ("amount due", "total due", "total bill"):
             for m in re.finditer(re.escape(anchor), low):
                 matches.append((m.start(), m.end(), 7, 30, 90))
+
+        for m in _DUE_FIGURE_RE.finditer(cleaned):
+            sign, number = m.group(1), m.group(2)
+            if not (sign or "." in number):
+                continue
+            matches.append((m.start(), m.end(), 20, 30, 110))
 
         if not matches:
             for marker in ("amount due", "total due", "total bill", "total new charges", "account number"):
@@ -115,41 +130,40 @@ class RetrievalTool:
         if not matches:
             return cleaned[:limit]
 
-        matches.sort(key=lambda x: -x[2])
-
-        raw_intervals: list[tuple[int, int]] = []
-        for start, end, _, pad_before, pad_after in matches:
+        raw_intervals: list[tuple[int, int, int]] = []
+        for start, end, priority, pad_before, pad_after in matches:
             w_start = max(0, start - pad_before)
             w_end = min(len(cleaned), end + pad_after)
-            raw_intervals.append((w_start, w_end))
+            raw_intervals.append((w_start, w_end, priority))
+        raw_intervals.sort(key=lambda x: x[0])
 
-        merged_intervals: list[tuple[int, int]] = []
-        for s, e in raw_intervals:
+        merged_intervals: list[tuple[int, int, int]] = []
+        for s, e, priority in raw_intervals:
             merged = False
-            for i, (ms, me) in enumerate(merged_intervals):
+            for i, (ms, me, mp) in enumerate(merged_intervals):
                 if not (e < ms - 20 or s > me + 20):
-                    merged_intervals[i] = (min(ms, s), max(me, e))
+                    merged_intervals[i] = (min(ms, s), max(me, e), max(mp, priority))
                     merged = True
                     break
             if not merged:
-                merged_intervals.append((s, e))
+                merged_intervals.append((s, e, priority))
 
         merged_intervals.sort(key=lambda x: x[0])
 
         chosen: list[tuple[int, int]] = []
         cur_len = 0
-        for s, e in merged_intervals:
+        for s, e, priority in sorted(merged_intervals, key=lambda x: (-x[2], x[0])):
             span_len = e - s
-            if cur_len + span_len > limit:
-                rem = limit - cur_len
-                if rem > 60:
-                    chosen.append((s, s + rem))
-                    cur_len += rem
-                break
-            chosen.append((s, e))
-            cur_len += span_len
+            if cur_len + span_len <= limit:
+                chosen.append((s, e))
+                cur_len += span_len
+            elif limit - cur_len > 60:
+                chosen.append((s, s + (limit - cur_len)))
+                cur_len = limit
             if cur_len >= limit - 30:
                 break
+
+        chosen.sort(key=lambda x: x[0])
 
         if not chosen and merged_intervals:
             s, e = merged_intervals[0]
@@ -179,7 +193,12 @@ class RetrievalTool:
         top = [(doc_id, text) for doc_id, text in ranked[: args.top_k] if _score(text) > 0]
         if not top:
             return f"retrieve [{args.query}]: no matching document"
-        parts = [f"{doc_id} | {self._snippet(text, query=args.query)}" for doc_id, text in top]
+        parts = []
+        for doc_id, text in top:
+            # Evidence records the document's own text, not the formatted
+            # history line. Grounding checks this lane only.
+            state.evidence.append(Evidence(doc_id=doc_id, text=text, query=args.query))
+            parts.append(f"{doc_id} | {self._snippet(text, query=args.query)}")
         return f"retrieve [{args.query}]: " + " || ".join(parts)
 
     def as_tool_fn(self, args: RetrievalArgs):
@@ -197,15 +216,24 @@ class LedgerWriteTool:
     RULES = (
         "amounts must be positive numbers (credits are unsupported); "
         "entry_id and source_doc are required; "
-        "amounts over 10000 pause for human approval"
+        "amounts over 10000 pause for human approval; "
+        "a document already posted cannot be posted again"
     )
 
-    def __init__(self) -> None:
+    def __init__(self, posted: Callable[[LedgerArgs], dict | None] | None = None) -> None:
         self.entries: list[LedgerArgs] = []
+        # Injected by the service so the orchestrator can refuse a re-post
+        # before a human is ever asked to approve one.
+        self._posted = posted
+
+    def already_posted(self, args: LedgerArgs) -> dict | None:
+        if self._posted is None:
+            return None
+        return self._posted(args)
 
     def execute(self, state: AgentState, args: LedgerArgs) -> str:
         self.entries.append(args)
-        return f"ledger_write: {args.entry_id} {args.amount:.2f} {args.currency}"
+        return f"ledger_write: {args.source_doc} {args.amount:.2f} {args.currency}"
 
     def as_tool_fn(self, args: LedgerArgs):
         def _fn(state: AgentState) -> str:

@@ -43,7 +43,7 @@ def test_ledger_appends_and_receipts() -> None:
     ledger = LedgerWriteTool()
     args = LedgerArgs(entry_id="j-001", amount=48.2, source_doc="q3-financials")
     event = ledger.execute(AgentState(task="t"), args)
-    assert event == "ledger_write: j-001 48.20 AUD"
+    assert event == "ledger_write: q3-financials 48.20 AUD"
     assert len(ledger.entries) == 1
 
 
@@ -67,6 +67,38 @@ def test_retrieval_snippet_preserves_query_matches_and_account_number() -> None:
     assert "463" in event
     assert "Jane Citizen" in event
     assert "bill-1" in event
+
+
+def test_retrieval_snippet_keeps_due_figure_past_the_header() -> None:
+    filler = "Payment options and contact details for your account. " * 30
+    corpus = {
+        "bill-long": (
+            "Tax invoice. Account number 123456. Amount due Due date. "
+            + filler
+            + " Total new charges (including GST) = $63.70 Amount Due = $63.70."
+        )
+    }
+    tool = RetrievalTool(corpus)
+    event = tool.execute(AgentState(task="t"), RetrievalArgs(query="amount due"))
+    assert "123456" in event
+    assert "63.70" in event
+
+
+def test_retrieval_snippet_keeps_query_match_and_identity_figure() -> None:
+    filler = "Payment options and contact details for your account. " * 20
+    corpus = {
+        "bill-long": (
+            "Tax invoice. Name Sam Sample. Account number 123456. "
+            + filler
+            + " Solar exports feed-in tariff 200 kWh at 0.05 dollars per kWh. "
+            "Amount due 63.70 dollars."
+        )
+    }
+    tool = RetrievalTool(corpus)
+    event = tool.execute(AgentState(task="t"), RetrievalArgs(query="solar export"))
+    assert "Sam Sample" in event
+    assert "200 kWh" in event
+    assert "63.70" in event
 
 
 def test_retrieval_ranks_multiple_candidates_by_relevance() -> None:

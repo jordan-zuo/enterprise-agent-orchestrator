@@ -1,7 +1,7 @@
 from agent.approvals import ApprovalQueue
 from agent.ledger_flow import guarded_ledger_write
 from agent.periods import evidence_months, period_compatible, task_markers
-from agent.states import AgentState
+from agent.states import AgentState, Evidence
 from agent.tools import LedgerArgs, LedgerWriteTool
 
 
@@ -18,8 +18,11 @@ def test_christmas_task_rejects_april_bill() -> None:
     args = LedgerArgs(entry_id="agl-xmas", amount=63.70, source_doc="bill-agl-apr23")
     state = AgentState(
         task="agl bill for christmas",
-        history=[
-            "retrieve [bill]: bill-agl-apr23 | Amount due 63.70 dollars Due date 23 Apr 2023"
+        evidence=[
+            Evidence(
+                doc_id="bill-agl-apr23",
+                text="Amount due 63.70 dollars Due date 23 Apr 2023",
+            )
         ],
     )
     event = guarded_ledger_write(state, ledger, args, queue)
@@ -34,9 +37,12 @@ def test_lease_task_allows_matching_quarter() -> None:
     )
     state = AgentState(
         task="reconcile against lease-7",
-        history=[
-            "retrieve [bill]: bill-q3-electricity | Amount due 4049.18 dollars Bill period 1 July to 30 September",
-            "retrieve [lease]: lease-7 | Tenant account 99881",
+        evidence=[
+            Evidence(
+                doc_id="bill-q3-electricity",
+                text="Amount due 4049.18 dollars Bill period 1 July to 30 September",
+            ),
+            Evidence(doc_id="lease-7", text="Tenant account 99881"),
         ],
     )
     event = guarded_ledger_write(state, ledger, args, queue)

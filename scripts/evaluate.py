@@ -20,7 +20,7 @@ sys.path.insert(0, str(ROOT))
 from agent.approvals import ApprovalQueue  # noqa: E402
 from agent.graph import run  # noqa: E402
 from agent.ledger_flow import guarded_ledger_write, resume_after_approval  # noqa: E402
-from agent.states import AgentState  # noqa: E402
+from agent.states import AgentState, Evidence  # noqa: E402
 from agent.tools import LedgerArgs, LedgerWriteTool  # noqa: E402
 
 SUITE_PATH = ROOT / "scenarios" / "suite.json"
@@ -41,6 +41,14 @@ def _completing_tool(steps_needed: int):
 
 def _stubborn_tool(state: AgentState) -> str:
     return "no progress"
+
+
+def _seed_evidence(state: AgentState, lines: list[str]) -> None:
+    """Convert legacy seed lines into the evidence lane for eval cases."""
+    for line in lines:
+        head, _, text = line.partition(" | ")
+        doc_id = head.rsplit(": ", 1)[-1] if ": " in head else head
+        state.evidence.append(Evidence(doc_id=doc_id.strip(), text=text or line))
 
 
 def _run_completion(case: dict) -> dict:
@@ -69,7 +77,9 @@ def _run_ledger(case: dict) -> dict:
     ledger, queue = LedgerWriteTool(), ApprovalQueue()
     state = AgentState(task=case["id"])
     args = LedgerArgs(entry_id=case["entry_id"], amount=case["amount"], source_doc="eval")
-    state.history.append(f"retrieve [seed]: eval | total {args.amount:.2f}")
+    state.evidence.append(
+        Evidence(doc_id="eval", text=f"total {args.amount:.2f}")
+    )
     out = guarded_ledger_write(state, ledger, args, queue)
     if state.status == "awaiting_approval":
         if case.get("approve", False):
@@ -110,8 +120,11 @@ def _run_grounding(case: dict) -> dict:
         source_doc=case.get("source_doc", "q3"),
     )
     if case.get("seed", False):
-        state.history.append(
-            f"retrieve [seed]: {args.source_doc} | total {args.amount:.2f}"
+        state.evidence.append(
+            Evidence(
+                doc_id=args.source_doc,
+                text=f"total {args.amount:.2f}",
+            )
         )
     out = guarded_ledger_write(state, ledger, args, queue)
     allowed = out.startswith("ledger_write:") or out.startswith("t-")
@@ -127,19 +140,24 @@ def _run_grounding(case: dict) -> dict:
 
 def _run_math(case: dict) -> dict:
     ledger, queue = LedgerWriteTool(), ApprovalQueue()
-    bill_text = (
-        "retrieve [bill]: bill-q3-electricity | Amount due 4049.18 dollars, "
-        "that is 4049 dollars 18 cents"
+    state = AgentState(task=case["id"])
+    state.evidence.append(
+        Evidence(
+            doc_id="bill-q3-electricity",
+            text="Amount due 4049.18 dollars, that is 4049 dollars 18 cents",
+        )
     )
-    state = AgentState(task=case["id"], history=[bill_text])
     args = LedgerArgs(
         entry_id=case["entry_id"],
         amount=case["amount"],
         source_doc="bill-q3-electricity",
     )
     if abs(float(case["amount"]) - 4049.18) > 0.01:
-        state.history.append(
-            f"retrieve [guess]: bill-q3-electricity | total {float(case['amount']):.2f}"
+        state.evidence.append(
+            Evidence(
+                doc_id="bill-q3-electricity",
+                text=f"total {float(case['amount']):.2f}",
+            )
         )
     out = guarded_ledger_write(state, ledger, args, queue)
     allowed = out.startswith("ledger_write:") or out.startswith("t-")
@@ -156,8 +174,7 @@ def _run_math(case: dict) -> dict:
 def _run_period(case: dict) -> dict:
     ledger, queue = LedgerWriteTool(), ApprovalQueue()
     state = AgentState(task=case["task"])
-    for line in case.get("history", []):
-        state.history.append(line)
+    _seed_evidence(state, case.get("history", []))
     args = LedgerArgs(
         entry_id=case["entry_id"],
         amount=case["amount"],
