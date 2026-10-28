@@ -240,9 +240,13 @@ class RetrievalTool:
         parts = []
         for doc_id, text in top:
             # Evidence records the document's own text, not the formatted
-            # history line. Grounding checks this lane only.
-            state.evidence.append(Evidence(doc_id=doc_id, text=text, query=args.query))
-            parts.append(f"{doc_id} | {self._snippet(text, query=args.query)}")
+            # history line. Grounding checks this lane only. The snippet is
+            # the same passage the model sees, for readers of the record.
+            snippet = self._snippet(text, query=args.query)
+            state.evidence.append(
+                Evidence(doc_id=doc_id, text=text, query=args.query, snippet=snippet)
+            )
+            parts.append(f"{doc_id} | {snippet}")
         return f"retrieve [{args.query}]: " + " || ".join(parts)
 
     def as_tool_fn(self, args: RetrievalArgs):

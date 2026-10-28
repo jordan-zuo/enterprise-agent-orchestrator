@@ -51,6 +51,11 @@ def _completion(content: str):
     )
 
 
+def _empty_completion():
+    """OpenRouter can answer 200 with no choices when a free provider fails."""
+    return SimpleNamespace(choices=None, usage=SimpleNamespace(prompt_tokens=0, completion_tokens=0))
+
+
 class _Completions:
     def __init__(self, contents: list[str]) -> None:
         self.contents = list(contents)
@@ -58,7 +63,12 @@ class _Completions:
 
     def create(self, **kwargs):
         self.calls.append(kwargs)
-        return _completion(self.contents.pop(0))
+        item = self.contents.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        if isinstance(item, str):
+            return _completion(item)
+        return item
 
 
 class _JudgeClient:
@@ -113,7 +123,9 @@ def test_judge_prompt_embeds_rubric_gold_and_hard_checks() -> None:
     assert "deterministic_checks" in user
 
 
-def test_judge_retries_malformed_json_then_parses() -> None:
+def test_judge_retries_malformed_json_then_parses(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("JUDGE_REASONING", raising=False)
+    monkeypatch.delenv("JUDGE_JSON_MODE", raising=False)
     agl = _case("agl-due-post")
     record = _record([{"entry_id": "j-1", "amount": 63.70, "source_doc": "agl-better-bills-sample-bill-necf"}])
     record["hard"] = hard_checks(agl, record)
@@ -122,13 +134,67 @@ def test_judge_retries_malformed_json_then_parses() -> None:
     result = judge_case(client, "qwen/qwen3.8-27b", agl, record)
     assert result["verdict"]["verdict"] == "pass"
     assert len(client.chat.completions.calls) == 2
-    first = client.chat.completions.calls[0]
-    assert first["temperature"] == 0
-    assert first["response_format"] == {"type": "json_object"}
-    assert first["extra_body"] == {"reasoning_effort": "none"}
+    assert client.chat.completions.calls[0]["temperature"] == 0
 
     with pytest.raises(JudgeError):
         judge_case(_JudgeClient(["nope", "still nope"]), "qwen/qwen3.8-27b", agl, record)
+
+
+class _RateLimited(Exception):
+    status_code = 429
+
+
+def test_judge_pool_moves_to_next_model_when_one_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("JUDGE_REASONING", raising=False)
+    monkeypatch.delenv("JUDGE_JSON_MODE", raising=False)
+    agl = _case("agl-due-post")
+    record = _record([{"entry_id": "j-1", "amount": 63.70, "source_doc": "agl-better-bills-sample-bill-necf"}])
+    record["hard"] = hard_checks(agl, record)
+
+    client = _JudgeClient([_RateLimited("429 from model-a"), json.dumps(_verdict())])
+    result = judge_case(client, "model-a,model-b", agl, record)
+    assert result["model"] == "model-b"
+    assert [call["model"] for call in client.chat.completions.calls] == ["model-a", "model-b"]
+    assert "response_format" not in client.chat.completions.calls[0]
+    assert "extra_body" not in client.chat.completions.calls[0]
+
+    with pytest.raises(JudgeError, match="model-a.*model-b"):
+        judge_case(_JudgeClient([_RateLimited("a"), _RateLimited("b")]), "model-a,model-b", agl, record)
+
+
+def test_judge_moves_on_when_a_model_returns_no_choices(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("JUDGE_REASONING", raising=False)
+    monkeypatch.delenv("JUDGE_JSON_MODE", raising=False)
+    agl = _case("agl-due-post")
+    record = _record([{"entry_id": "j-1", "amount": 63.70, "source_doc": "agl-better-bills-sample-bill-necf"}])
+    record["hard"] = hard_checks(agl, record)
+
+    client = _JudgeClient([_empty_completion(), _empty_completion(), json.dumps(_verdict())])
+    result = judge_case(client, "model-a,model-b", agl, record)
+    assert result["model"] == "model-b"
+    assert len(client.chat.completions.calls) == 3
+
+
+def test_judge_request_settings_follow_env_and_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    agl = _case("agl-due-post")
+    record = _record([{"entry_id": "j-1", "amount": 63.70, "source_doc": "agl-better-bills-sample-bill-necf"}])
+    record["hard"] = hard_checks(agl, record)
+
+    monkeypatch.delenv("JUDGE_REASONING", raising=False)
+    monkeypatch.delenv("JUDGE_JSON_MODE", raising=False)
+    plain = _JudgeClient([json.dumps(_verdict())])
+    judge_case(plain, "m", agl, record, base_url="https://openrouter.ai/api/v1")
+    assert "extra_body" not in plain.chat.completions.calls[0]
+
+    monkeypatch.setenv("JUDGE_REASONING", "off")
+    monkeypatch.setenv("JUDGE_JSON_MODE", "1")
+    tuned = _JudgeClient([json.dumps(_verdict()), json.dumps(_verdict())])
+    judge_case(tuned, "m", agl, record, base_url="https://openrouter.ai/api/v1")
+    judge_case(tuned, "m", agl, record, base_url="https://api.groq.com/openai/v1")
+    openrouter, groq = tuned.chat.completions.calls
+    assert openrouter["extra_body"] == {"reasoning": {"enabled": False}}
+    assert openrouter["response_format"] == {"type": "json_object"}
+    assert groq["extra_body"] == {"reasoning_effort": "none"}
 
 
 class _AuthError(Exception):

@@ -75,6 +75,30 @@ def test_retry_recovers_after_invented_action() -> None:
     assert client.calls == 2
 
 
+class _ToolCallRejected(Exception):
+    status_code = 400
+
+    def __str__(self) -> str:
+        return "tool_choice is none, but model called a tool"
+
+
+class _ToolCallClient(_FlakyClient):
+    """Raises a provider tool-call rejection once, then routes correctly."""
+
+    def create(self, **kwargs) -> _FakeCompletion:
+        self.calls += 1
+        if self.calls == 1:
+            raise _ToolCallRejected()
+        return _FakeCompletion('{"action": "retrieve", "args": {"query": "rent"}}')
+
+
+def test_tool_call_rejection_is_retried_as_bad_answer() -> None:
+    client = _ToolCallClient()
+    decision = decide(AgentState(task="t"), client, "test-model")
+    assert decision.action == "retrieve"
+    assert client.calls == 2
+
+
 def test_prompt_carries_tool_catalog() -> None:
     from agent.driver import _prompt_for
 

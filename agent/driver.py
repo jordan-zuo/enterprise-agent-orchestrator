@@ -62,13 +62,16 @@ def _prompt_for(state: Any, hint: str = "", context: str = "") -> str:
         "If a requested detail (such as customer name) was not in the snippet, retrieve with that term or doc id first before finishing. "
         "For comparative questions (such as who has the highest or lowest amount), make sure to compare all candidate bills in context before concluding. "
         "One retrieve with top_k up to 10 returns every matching bill; prefer that over fetching documents one by one. "
+        "Never repeat a retrieve you already made; the result will not change. "
+        "Once a ledger write lands, finish with what you did instead of searching again. "
         "A retrieve result can list several documents separated by '||'; read every one before comparing. "
         "For solar exports, the billing-period total is the feed-in tariff row in kWh; a chart figure such as 'Solar exports: 15 kWh' is a daily average, not the total. "
         "If a bill has no solar export row, that customer has no solar exports. "
         "request_approval: pause for a human decision. "
         "Arg shapes: retrieve takes {query, top_k (optional, 1 to 10)}; ledger_write takes "
         "{entry_id, amount, source_doc}; finish takes {}; request_approval "
-        "takes {reason}. Reply with ONLY this JSON object: "
+        "takes {reason}. Do not emit tool calls or function-call syntax; "
+        "this channel accepts no tools. Reply with ONLY this JSON object: "
         '{"action": "<one of the four>", "args": {...}, "reason": "<short>"}. '
         f"Task: {state.task}. Steps used: {state.step_count}/{state.max_steps}. "
         f"History: {list(state.history)}."
@@ -108,6 +111,13 @@ def _call_settings() -> dict[str, Any]:
     return settings
 
 
+def _is_tool_call_rejection(exc: Exception) -> bool:
+    # Some providers parse tool syntax out of the text before returning it and
+    # reject the whole request. Nothing was executed, so it is a bad answer.
+    text = str(exc).lower()
+    return getattr(exc, "status_code", None) == 400 and "tool" in text
+
+
 def decide(state: Any, client: Any, model: str, max_attempts: int = 2, context: str = "") -> ModelDecision:
     """Ask the model what to do next. Malformed or unknown answers raise.
 
@@ -116,11 +126,17 @@ def decide(state: Any, client: Any, model: str, max_attempts: int = 2, context: 
     """
     hint = ""
     for _ in range(max_attempts):
-        completion = client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": _prompt_for(state, hint, context)}],
-            **_call_settings(),
-        )
+        try:
+            completion = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": _prompt_for(state, hint, context)}],
+                **_call_settings(),
+            )
+        except Exception as exc:
+            if not _is_tool_call_rejection(exc):
+                raise
+            hint = "the provider rejected a tool-call shaped answer; reply with the JSON route only"
+            continue
         content = completion.choices[0].message.content or ""
         try:
             return _parse(content)

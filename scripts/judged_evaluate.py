@@ -38,6 +38,7 @@ from scripts.judge import (  # noqa: E402
     JudgeConfigError,
     JudgeError,
     build_judge_client,
+    configured_models,
     judge_case,
     preflight_judge,
 )
@@ -241,7 +242,11 @@ def run_live_case(case: dict, agent_client: Any, agent_model: str, corpus: dict[
         "settled": state.settled,
         "decisions": list(state.decisions),
         "evidence": [
-            {"doc_id": item.doc_id, "query": item.query, "text": item.text[:500]}
+            {
+                "doc_id": item.doc_id,
+                "query": item.query,
+                "text": (item.snippet or item.text)[:900],
+            }
             for item in state.evidence
         ],
         "ledger": [entry.model_dump() for entry in ledger.entries],
@@ -396,6 +401,9 @@ def aggregate(records: list[dict], calibration: dict | None, meta: dict, judge_r
     for dimension in DIMENSIONS:
         values = [record["judge"]["verdict"][dimension] for record in judged]
         mean_scores[dimension] = round(sum(values) / len(values), 2) if values else None
+    models_used = sorted(
+        {record["judge"].get("model") for record in judged if record["judge"].get("model")}
+    )
 
     judge_tokens = 0
     judge_latency = 0.0
@@ -420,6 +428,7 @@ def aggregate(records: list[dict], calibration: dict | None, meta: dict, judge_r
         "judge_stricter": stricter,
         "judge_lenient": lenient,
         "judge_errors": total - len(judged) if judge_required else 0,
+        "judge_models_used": models_used,
         "mean_scores": mean_scores,
         "mean_steps": round(sum(record["steps"] for record in records) / total, 2) if total else 0.0,
         "agent_latency_ms": round(sum(record["latency_ms"] for record in records), 2),
@@ -451,7 +460,7 @@ def render_report(summary: dict, judge_required: bool) -> str:
         "| --- | --- |",
         f"| Agent model | `{summary.get('agent_model')}` |",
         f"| Agent base | `{summary.get('agent_base_url')}` |",
-        f"| Judge model | `{summary.get('judge_model') or 'not used'}` |",
+        f"| Judge models | `{summary.get('judge_model') or 'not used'}` |",
         f"| Judge base | `{summary.get('judge_base_url') or 'not used'}` |",
         f"| Rubric | `{RUBRIC_VERSION}` (`{RUBRIC_SHA}`) |",
         f"| Judge thinking | `{summary.get('reasoning_effort') or 'n/a'}` |",
@@ -473,6 +482,7 @@ def render_report(summary: dict, judge_required: bool) -> str:
         f"| Agent latency | {summary['agent_latency_ms']} ms |",
         f"| Judge latency | {summary['judge_latency_ms']} ms |",
         f"| Judge tokens | {summary['judge_tokens']} |",
+        f"| Judge models used | {', '.join(summary.get('judge_models_used') or []) or 'none'} |",
         "",
     ]
 
@@ -576,7 +586,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"suite: {len(cases)} case(s): {', '.join(case['id'] for case in cases)}")
         print(f"agent: model={os.environ.get('LLM_MODEL', 'mistral-Nemo-Instruct-2407')} "
               f"key={'set' if os.environ.get('LLM_API_KEY') else 'missing'}")
-        print(f"judge: model={os.environ.get('JUDGE_MODEL', 'qwen/qwen3.8-27b')} "
+        print(f"judge: models={', '.join(configured_models())} "
               f"base={os.environ.get('JUDGE_BASE_URL', 'https://api.groq.com/openai/v1')} "
               f"key={'set' if os.environ.get('JUDGE_API_KEY') else 'missing'}")
         print(f"rubric: {RUBRIC_VERSION} ({RUBRIC_SHA})")
@@ -601,7 +611,7 @@ def main(argv: list[str] | None = None) -> int:
         except JudgeConfigError as exc:
             print(f"judge config error: {exc}")
             return 2
-        reasoning_effort = "none"
+        reasoning_effort = os.environ.get("JUDGE_REASONING", "").strip() or None
 
     corpus = json.loads(CORPUS_PATH.read_text(encoding="utf-8"))
     started_at = _now()
@@ -633,6 +643,9 @@ def main(argv: list[str] | None = None) -> int:
             except JudgeError as exc:
                 record["judge"] = None
                 record["judge_error"] = str(exc)
+            except Exception as exc:  # a judge bug must not abort the suite
+                record["judge"] = None
+                record["judge_error"] = f"{type(exc).__name__}: {exc}"
         else:
             record["judge"] = None
             record["judge_error"] = ""

@@ -108,6 +108,22 @@ def test_retrieval_snippet_keeps_query_match_and_identity_figure() -> None:
     assert "63.70" in event
 
 
+def test_evidence_keeps_the_snippet_the_model_saw() -> None:
+    filler = "Payment options and contact details for your account. " * 30
+    corpus = {
+        "bill-long": (
+            "Tax invoice. Account number 123456. "
+            + filler
+            + " Name Jane Citizen. Solar exports feed-in tariff 463 kWh."
+        )
+    }
+    state = AgentState(task="t")
+    RetrievalTool(corpus).execute(state, RetrievalArgs(query="solar export"))
+    item = state.evidence[0]
+    assert "Jane Citizen" in item.snippet
+    assert "Jane Citizen" not in item.text[:500]
+
+
 def test_retrieval_ranks_multiple_candidates_by_relevance() -> None:
     corpus = {
         "bill-sam": "Electricity invoice for Sam Sample. Solar export 200 kWh.",

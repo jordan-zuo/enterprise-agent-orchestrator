@@ -46,6 +46,9 @@ def run_with_model(
         return cancel is not None and cancel.is_set()
 
     last_move: str | None = None
+    last_query: str | None = None
+    retrieve_repeats = 0
+    retrieve_nudged = False
     while True:
         # Cooperative stop: checked between steps, so an in-flight model call
         # finishes but its decision is discarded.
@@ -179,6 +182,34 @@ def run_with_model(
         try:
             if decision.action == "retrieve":
                 args = RetrievalArgs(**decision.args)
+                key = args.query.strip().lower()
+                if key == last_query:
+                    retrieve_repeats += 1
+                else:
+                    last_query = key
+                    retrieve_repeats = 1
+                    retrieve_nudged = False
+                if retrieve_repeats >= 3:
+                    # Two identical reads are harmless. A third means the
+                    # model is stuck, and a nudge is cheaper than the ceiling.
+                    if retrieve_nudged:
+                        state.status = "failed"
+                        state.failure_reason = "repeated ineffective retrieve"
+                        state.log(
+                            "stopped: the agent kept repeating the same retrieve,"
+                            " so the run ended.",
+                            kind="error",
+                            data={"reason": state.failure_reason, "action": "retrieve"},
+                        )
+                        return state
+                    retrieve_nudged = True
+                    state.log(
+                        "not finished: you already have the results for this"
+                        " retrieve. Use that evidence and take the next step.",
+                        kind="rejected",
+                        data={"action": "retrieve", "reason": "repeated retrieve"},
+                    )
+                    continue
                 seen = len(state.evidence)
                 out = retrieval.execute(state, args)
                 state.log(

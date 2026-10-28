@@ -19,6 +19,7 @@ class Evidence(BaseModel):
     doc_id: str
     text: str
     query: str = ""
+    snippet: str = ""
 
 
 class AgentState(BaseModel):

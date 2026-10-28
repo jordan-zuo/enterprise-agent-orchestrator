@@ -184,6 +184,25 @@ def test_repeated_retrieve_is_allowed_and_the_run_continues() -> None:
     assert state.step_count == 3
 
 
+def test_three_identical_retrieves_are_nudged_then_fail() -> None:
+    """Two repeats are harmless, but a stuck loop should not burn the ceiling."""
+    client = _ScriptedClient(
+        [{"action": "retrieve", "args": {"query": "recovery clause"}, "reason": "look"}] * 4
+    )
+    state = run_with_model(
+        AgentState(task="t", max_steps=10),
+        client,
+        "test",
+        RetrievalTool(DOCS),
+        LedgerWriteTool(),
+        ApprovalQueue(),
+    )
+    assert state.status == "failed"
+    assert "repeated ineffective retrieve" in state.failure_reason
+    assert any(line.startswith("not finished:") for line in state.history)
+    assert state.step_count == 4
+
+
 def test_finish_without_posting_is_not_done() -> None:
     """Saying 'done' after naming an amount, with nothing posted, is a lie."""
     client = _ScriptedClient(

@@ -10,16 +10,15 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 import time
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError
 
-JUDGE_DEFAULT_BASE_URL = "https://api.groq.com/openai/v1"
-JUDGE_DEFAULT_MODEL = "qwen/qwen3.8-27b"
+JUDGE_DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
+JUDGE_DEFAULT_MODEL = "nvidia/nemotron-3-ultra-550b-a55b:free"
 JUDGE_MAX_TOKENS = 800
-JUDGE_TIMEOUT_SECONDS = 45.0
+JUDGE_TIMEOUT_SECONDS = 60.0
 
 RUBRIC_VERSION = "judge-v1"
 
@@ -64,8 +63,24 @@ class JudgeVerdict(BaseModel):
     evidence_refs: list[str] = Field(default_factory=list)
 
 
+def _model_list(model: str | list[str]) -> list[str]:
+    values = model.split(",") if isinstance(model, str) else list(model)
+    names = [str(value).strip() for value in values if str(value).strip()]
+    if not names:
+        raise JudgeError("no judge model configured")
+    return names
+
+
+def configured_models() -> list[str]:
+    """Read the pool from the environment, in fallback order."""
+    pool = os.environ.get("JUDGE_MODELS", "").strip()
+    if pool:
+        return _model_list(pool)
+    return [os.environ.get("JUDGE_MODEL", "").strip() or JUDGE_DEFAULT_MODEL]
+
+
 def build_judge_client(load_env: bool = True) -> tuple[Any, str, str]:
-    """Return (client, model, base_url). Keys stay in the environment."""
+    """Return (client, model label, base_url). Keys stay in the environment."""
     if load_env:
         try:
             from dotenv import load_dotenv
@@ -75,11 +90,11 @@ def build_judge_client(load_env: bool = True) -> tuple[Any, str, str]:
     api_key = os.environ.get("JUDGE_API_KEY", "").strip()
     if not api_key:
         raise JudgeConfigError(
-            "JUDGE_API_KEY is not set. Add it to .env, for example "
-            "JUDGE_API_KEY=gsk_... (never commit it)."
+            "JUDGE_API_KEY is not set. Add it to .env as "
+            "JUDGE_API_KEY=your-key (never commit it)."
         )
     base_url = os.environ.get("JUDGE_BASE_URL", "").strip() or JUDGE_DEFAULT_BASE_URL
-    model = os.environ.get("JUDGE_MODEL", "").strip() or JUDGE_DEFAULT_MODEL
+    model = ", ".join(configured_models())
     try:
         from openai import OpenAI
     except ImportError as exc:
@@ -104,9 +119,13 @@ def _error_text(exc: Exception, base_url: str, model: str) -> str:
         )
     if status == 429 or "429" in lowered or "rate limit" in lowered:
         return (
-            f"Judge rate limit hit at {base_url}. Wait and retry, "
+            f"Judge rate limit hit at {base_url} for {model}. Wait and retry, "
             "or run fewer cases at once."
         )
+    if status == 402 or "insufficient" in lowered or "credit" in lowered:
+        return f"Judge account has no credit at {base_url} for {model}."
+    if status == 403:
+        return f"Judge model {model} refused direct API use at {base_url}: {text[:160]}"
     if status == 404 or "model_not_found" in lowered:
         return f"Judge model {model} is not available at {base_url}."
     if "connect" in lowered or "timeout" in lowered:
@@ -114,16 +133,18 @@ def _error_text(exc: Exception, base_url: str, model: str) -> str:
     return f"Judge call failed at {base_url}: {text[:300]}"
 
 
-def preflight_judge(client: Any, model: str, base_url: str) -> None:
-    """Check the key and model before spending any case runs."""
+def preflight_judge(client: Any, model: str | list[str], base_url: str) -> None:
+    """Check the key and every model in the pool before spending case runs."""
+    models = _model_list(model)
     try:
         listing = client.models.list()
     except Exception as exc:
-        raise JudgeConfigError(_error_text(exc, base_url, model)) from exc
+        raise JudgeConfigError(_error_text(exc, base_url, models[0])) from exc
     ids = {getattr(item, "id", "") for item in getattr(listing, "data", [])}
-    if model not in ids:
+    missing = [name for name in models if name not in ids]
+    if missing:
         raise JudgeConfigError(
-            f"Judge model {model} is not listed at {base_url}. "
+            f"Judge model(s) {', '.join(missing)} not listed at {base_url}. "
             f"Available ids: {', '.join(sorted(i for i in ids if i)) or 'none'}"
         )
 
@@ -134,10 +155,10 @@ def _clip(value: Any, limit: int) -> str:
 
 
 def _compact_record(record: dict) -> dict:
-    """Keep the judge payload inside Groq's per-minute token budget.
+    """Keep the judge payload inside a free tier's per-minute token budget.
 
-    A long trajectory used to exceed the 7000 token limit, so the four
-    fields that grow with run length are tail-limited here.
+    A long trajectory can exceed a 7000 token limit, so the four fields that
+    grow with run length are tail-limited here.
     """
     checks = [
         {
@@ -204,7 +225,12 @@ def _slice_json(content: str) -> str:
 
 
 def _content_of(completion: Any) -> str:
-    return completion.choices[0].message.content or ""
+    choices = getattr(completion, "choices", None)
+    if not choices:
+        # OpenRouter can return 200 with no choices when an upstream free
+        # provider fails; treat it as unusable output, not a crash.
+        return ""
+    return choices[0].message.content or ""
 
 
 def _usage_of(completion: Any) -> dict[str, int]:
@@ -215,89 +241,89 @@ def _usage_of(completion: Any) -> dict[str, int]:
     }
 
 
-def _retry_after(exc: Exception) -> float | None:
-    """Seconds Groq asks us to wait, from headers or the error body."""
-    response = getattr(exc, "response", None)
-    headers = getattr(response, "headers", None)
-    if headers:
-        for key in ("retry-after", "x-ratelimit-reset-tokens"):
-            value = headers.get(key)
-            if value:
-                try:
-                    return float(str(value).rstrip("s"))
-                except ValueError:
-                    pass
-    match = re.search(r"retry[_ ]after['\"]?\s*[:=]\s*([0-9.]+)", str(exc), re.IGNORECASE)
-    return float(match.group(1)) if match else None
+def _reasoning_body(base_url: str) -> dict[str, Any]:
+    value = os.environ.get("JUDGE_REASONING", "").strip().lower()
+    if not value:
+        return {}
+    off = value in {"off", "none", "false", "0"}
+    if "openrouter" in base_url.lower():
+        # OpenRouter takes a reasoning object; free models default to thinking.
+        return {"reasoning": {"enabled": False}} if off else {"reasoning": {"effort": value}}
+    return {"reasoning_effort": "none" if off else value}
 
 
-def _create(client: Any, model: str, messages: list[dict[str, str]], effort: str) -> tuple[Any, str]:
+def _json_mode() -> bool:
+    return os.environ.get("JUDGE_JSON_MODE", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _create(client: Any, model: str, messages: list[dict[str, str]], base_url: str) -> Any:
     kwargs: dict[str, Any] = {
         "model": model,
         "messages": messages,
         "temperature": 0,
         "max_tokens": JUDGE_MAX_TOKENS,
-        "response_format": {"type": "json_object"},
-        "extra_body": {"reasoning_effort": effort},
     }
-    try:
-        return client.chat.completions.create(**kwargs), effort
-    except Exception as exc:
-        # Groq may not accept reasoning_effort=none for every model version.
-        # Low is the next cheapest setting and still keeps the judge terse.
-        if effort == "none" and getattr(exc, "status_code", None) == 400 and "reasoning" in str(exc).lower():
-            kwargs["extra_body"] = {"reasoning_effort": "low"}
-            return client.chat.completions.create(**kwargs), "low"
-        raise
+    if _json_mode():
+        kwargs["response_format"] = {"type": "json_object"}
+    extra = _reasoning_body(base_url)
+    if extra:
+        kwargs["extra_body"] = extra
+    return client.chat.completions.create(**kwargs)
 
 
 def judge_case(
     client: Any,
-    model: str,
+    model: str | list[str],
     case: dict,
     record: dict,
     base_url: str = JUDGE_DEFAULT_BASE_URL,
     max_attempts: int = 2,
 ) -> dict:
-    messages = build_judge_messages(case, record)
-    last_error = ""
+    """Ask the pool in order until one model returns a valid verdict.
+
+    A rate limit, a refused model, or unusable output moves to the next
+    model. An invalid reply gets one repair attempt on the same model first.
+    """
+    models = _model_list(model)
+    base_messages = build_judge_messages(case, record)
     started = time.perf_counter()
-    effort_used = "none"
-    for attempt in range(max_attempts):
-        completion = None
-        for rate_try in range(2):
+    errors: list[str] = []
+    tried: list[str] = []
+    for name in models:
+        if name not in tried:
+            tried.append(name)
+        messages = list(base_messages)
+        for _ in range(max_attempts):
             try:
-                completion, effort_used = _create(client, model, messages, effort_used)
-                break
+                completion = _create(client, name, messages, base_url)
             except Exception as exc:
-                wait = _retry_after(exc)
-                if wait is not None and rate_try < 1:
-                    # Groq enforces a per-minute token budget. Wait once for
-                    # the advertised reset, then fail visibly instead of
-                    # stacking long sleeps.
-                    time.sleep(min(max(wait, 1.0), 20.0))
-                    continue
-                raise JudgeError(_error_text(exc, base_url, model)) from exc
-        try:
-            verdict = JudgeVerdict.model_validate(json.loads(_slice_json(_content_of(completion))))
-        except (ValueError, ValidationError) as exc:
-            last_error = str(exc)
-            messages = messages + [
-                {
-                    "role": "user",
-                    "content": (
-                        f"Your previous reply was invalid: {last_error}. "
-                        "Reply with only the JSON object described by the rubric."
-                    ),
-                }
-            ]
-            continue
-        latency_ms = (time.perf_counter() - started) * 1000
-        return {
-            "verdict": verdict.model_dump(),
-            "latency_ms": round(latency_ms, 2),
-            "usage": _usage_of(completion),
-            "model": model,
-            "reasoning_effort": effort_used,
-        }
-    raise JudgeError(f"judge returned invalid JSON after {max_attempts} attempts: {last_error}")
+                text = _error_text(exc, base_url, name)
+                errors.append(text)
+                if getattr(exc, "status_code", None) == 401:
+                    raise JudgeError(text) from exc
+                break
+            try:
+                verdict = JudgeVerdict.model_validate(json.loads(_slice_json(_content_of(completion))))
+            except (ValueError, ValidationError) as exc:
+                errors.append(f"{name} returned unusable output: {exc}")
+                messages = messages + [
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Your previous reply was invalid: {exc}. "
+                            "Reply with only the JSON object described by the rubric."
+                        ),
+                    }
+                ]
+                continue
+            latency_ms = (time.perf_counter() - started) * 1000
+            return {
+                "verdict": verdict.model_dump(),
+                "latency_ms": round(latency_ms, 2),
+                "usage": _usage_of(completion),
+                "model": name,
+                "models_tried": tried,
+                "reasoning_effort": os.environ.get("JUDGE_REASONING", "").strip() or None,
+            }
+    detail = " | ".join(errors[-3:]) if errors else "no models configured"
+    raise JudgeError(f"no judge model returned a verdict after {len(errors)} attempt(s): {detail}")
