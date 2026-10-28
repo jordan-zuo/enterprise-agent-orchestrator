@@ -1,16 +1,14 @@
-"""Manual live end-to-end loop. NOT part of CI: needs LLM_API_KEY and network.
+"""Manual live end-to-end loop. NOT part of CI: needs provider keys and network.
 
 Runs the model-driven loop against real tools. Small ledger writes execute
 at once; anything over the threshold pauses for your approval decision.
 
 Usage (repo root):
-    $env:LLM_API_KEY = "<key>"
     python scripts/live_loop.py
 """
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -34,10 +32,10 @@ DOCS = json.load(open(ROOT / "data" / "corpus.json", encoding="utf-8"))
 def main() -> None:
     if load_dotenv is not None:
         load_dotenv()
-    model = os.environ.get("LLM_MODEL", "mistral-Nemo-Instruct-2407")
-    base_url = os.environ.get("LLM_BASE_URL", "https://api.llm7.io/v1")
-    print(f"model={model} base={base_url} (key hidden)")
     client = build_client()
+    labels = [spec.label for spec in client.specs]
+    print(f"agent pool={', '.join(labels)} (key hidden)")
+    model = "auto"
     queue = ApprovalQueue()
     ledger = LedgerWriteTool()
     state = run_with_model(

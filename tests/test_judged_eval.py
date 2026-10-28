@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from agent.models import ModelSpec, RotatingClient
 from scripts.judge import (
     RUBRIC_SHA,
     RUBRIC_VERSION,
@@ -51,29 +52,46 @@ def _completion(content: str):
     )
 
 
-def _empty_completion():
-    """OpenRouter can answer 200 with no choices when a free provider fails."""
-    return SimpleNamespace(choices=None, usage=SimpleNamespace(prompt_tokens=0, completion_tokens=0))
+def _spec(label: str, key_env: str = "KEY_A") -> ModelSpec:
+    return ModelSpec(
+        label=label,
+        roles=("judge",),
+        provider="groq",
+        model=f"model-{label}",
+        base_url="https://example.invalid/v1",
+        api_key_env=key_env,
+        max_output_tokens=1200,
+    )
 
 
-class _Completions:
-    def __init__(self, contents: list[str]) -> None:
-        self.contents = list(contents)
+class _Provider:
+    def __init__(self, results: list, listed: list[str] | None = None, list_error: Exception | None = None) -> None:
+        self.results = list(results)
         self.calls: list[dict] = []
+        self.chat = SimpleNamespace(completions=self)
+        self.models = _Models(listed or [], list_error)
 
     def create(self, **kwargs):
         self.calls.append(kwargs)
-        item = self.contents.pop(0)
+        item = self.results.pop(0) if len(self.results) > 1 else self.results[0]
         if isinstance(item, Exception):
             raise item
-        if isinstance(item, str):
-            return _completion(item)
-        return item
+        return _completion(item) if isinstance(item, str) else item
 
 
-class _JudgeClient:
-    def __init__(self, contents: list[str]) -> None:
-        self.chat = SimpleNamespace(completions=_Completions(contents))
+class _Models:
+    def __init__(self, ids: list[str], error: Exception | None = None) -> None:
+        self.ids = ids
+        self.error = error
+
+    def list(self):
+        if self.error is not None:
+            raise self.error
+        return SimpleNamespace(data=[SimpleNamespace(id=item) for item in self.ids])
+
+
+def _pool(specs: list[ModelSpec], providers: dict[str, _Provider]) -> RotatingClient:
+    return RotatingClient(specs, client_factory=lambda spec: providers[spec.label], max_wait=0)
 
 
 def _verdict(verdict: str = "pass") -> dict:
@@ -123,6 +141,10 @@ def test_judge_prompt_embeds_rubric_gold_and_hard_checks() -> None:
     assert "deterministic_checks" in user
 
 
+class _RateLimited(Exception):
+    status_code = 429
+
+
 def test_judge_retries_malformed_json_then_parses(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("JUDGE_REASONING", raising=False)
     monkeypatch.delenv("JUDGE_JSON_MODE", raising=False)
@@ -130,96 +152,69 @@ def test_judge_retries_malformed_json_then_parses(monkeypatch: pytest.MonkeyPatc
     record = _record([{"entry_id": "j-1", "amount": 63.70, "source_doc": "agl-better-bills-sample-bill-necf"}])
     record["hard"] = hard_checks(agl, record)
 
-    client = _JudgeClient(["not json", json.dumps(_verdict())])
-    result = judge_case(client, "qwen/qwen3.8-27b", agl, record)
+    provider = _Provider(["not json", json.dumps(_verdict())])
+    result = judge_case(_pool([_spec("a")], {"a": provider}), agl, record)
     assert result["verdict"]["verdict"] == "pass"
-    assert len(client.chat.completions.calls) == 2
-    assert client.chat.completions.calls[0]["temperature"] == 0
+    assert len(provider.calls) == 2
+    assert provider.calls[0]["temperature"] == 0
+    assert provider.calls[0]["max_tokens"] == 1200
+    assert "response_format" not in provider.calls[0]
 
+    bad = _Provider(["nope", "still nope"])
     with pytest.raises(JudgeError):
-        judge_case(_JudgeClient(["nope", "still nope"]), "qwen/qwen3.8-27b", agl, record)
+        judge_case(_pool([_spec("a")], {"a": bad}), agl, record)
 
 
-class _RateLimited(Exception):
-    status_code = 429
-
-
-def test_judge_pool_moves_to_next_model_when_one_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_judge_case_rotates_and_records_the_model(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("JUDGE_REASONING", raising=False)
     monkeypatch.delenv("JUDGE_JSON_MODE", raising=False)
     agl = _case("agl-due-post")
     record = _record([{"entry_id": "j-1", "amount": 63.70, "source_doc": "agl-better-bills-sample-bill-necf"}])
     record["hard"] = hard_checks(agl, record)
 
-    client = _JudgeClient([_RateLimited("429 from model-a"), json.dumps(_verdict())])
-    result = judge_case(client, "model-a,model-b", agl, record)
-    assert result["model"] == "model-b"
-    assert [call["model"] for call in client.chat.completions.calls] == ["model-a", "model-b"]
-    assert "response_format" not in client.chat.completions.calls[0]
-    assert "extra_body" not in client.chat.completions.calls[0]
+    limited = _Provider([_RateLimited("429 from model-a")])
+    healthy = _Provider([json.dumps(_verdict())])
+    client = _pool([_spec("a"), _spec("b")], {"a": limited, "b": healthy})
 
-    with pytest.raises(JudgeError, match="model-a.*model-b"):
-        judge_case(_JudgeClient([_RateLimited("a"), _RateLimited("b")]), "model-a,model-b", agl, record)
-
-
-def test_judge_moves_on_when_a_model_returns_no_choices(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("JUDGE_REASONING", raising=False)
-    monkeypatch.delenv("JUDGE_JSON_MODE", raising=False)
-    agl = _case("agl-due-post")
-    record = _record([{"entry_id": "j-1", "amount": 63.70, "source_doc": "agl-better-bills-sample-bill-necf"}])
-    record["hard"] = hard_checks(agl, record)
-
-    client = _JudgeClient([_empty_completion(), _empty_completion(), json.dumps(_verdict())])
-    result = judge_case(client, "model-a,model-b", agl, record)
-    assert result["model"] == "model-b"
-    assert len(client.chat.completions.calls) == 3
-
-
-def test_judge_request_settings_follow_env_and_provider(monkeypatch: pytest.MonkeyPatch) -> None:
-    agl = _case("agl-due-post")
-    record = _record([{"entry_id": "j-1", "amount": 63.70, "source_doc": "agl-better-bills-sample-bill-necf"}])
-    record["hard"] = hard_checks(agl, record)
-
-    monkeypatch.delenv("JUDGE_REASONING", raising=False)
-    monkeypatch.delenv("JUDGE_JSON_MODE", raising=False)
-    plain = _JudgeClient([json.dumps(_verdict())])
-    judge_case(plain, "m", agl, record, base_url="https://openrouter.ai/api/v1")
-    assert "extra_body" not in plain.chat.completions.calls[0]
-
-    monkeypatch.setenv("JUDGE_REASONING", "off")
-    monkeypatch.setenv("JUDGE_JSON_MODE", "1")
-    tuned = _JudgeClient([json.dumps(_verdict()), json.dumps(_verdict())])
-    judge_case(tuned, "m", agl, record, base_url="https://openrouter.ai/api/v1")
-    judge_case(tuned, "m", agl, record, base_url="https://api.groq.com/openai/v1")
-    openrouter, groq = tuned.chat.completions.calls
-    assert openrouter["extra_body"] == {"reasoning": {"enabled": False}}
-    assert openrouter["response_format"] == {"type": "json_object"}
-    assert groq["extra_body"] == {"reasoning_effort": "none"}
+    result = judge_case(client, agl, record)
+    assert result["model"] == "b"
+    assert result["models_tried"] == ["a", "b"]
+    assert len(limited.calls) == 1
+    assert len(healthy.calls) == 1
 
 
 class _AuthError(Exception):
     status_code = 401
 
-
-class _Models:
-    def list(self):
-        raise _AuthError("invalid api key")
+    def __init__(self) -> None:
+        super().__init__("invalid api key")
 
 
 def test_judge_preflight_reports_missing_key_and_401(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("JUDGE_API_KEY", raising=False)
+    for name in ("GROQ_API_KEY", "LLM7_API_KEY", "GOOGLE_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
     with pytest.raises(JudgeConfigError) as missing:
         build_judge_client(load_env=False)
-    assert "JUDGE_API_KEY" in str(missing.value)
+    message = str(missing.value)
+    assert "GROQ_API_KEY" in message and "GOOGLE_API_KEY" in message
 
-    with pytest.raises(JudgeConfigError) as rejected:
-        preflight_judge(
-            SimpleNamespace(models=_Models()),
-            "qwen/qwen3.8-27b",
-            "https://api.groq.com/openai/v1",
-        )
-    assert "api.groq.com/openai/v1" in str(rejected.value)
-    assert "fresh key" in str(rejected.value)
+    rejected = _Provider([], list_error=_AuthError())
+    healthy = _Provider([], listed=["model-b"])
+    client = _pool(
+        [_spec("a", key_env="KEY_A"), _spec("b", key_env="KEY_B")],
+        {"a": rejected, "b": healthy},
+    )
+    preflight_judge(client, ["a", "b"], ["https://example.invalid/v1"])
+    states = {row["label"]: row["state"] for row in client.snapshot()}
+    assert states == {"a": "disabled", "b": "ready"}
+    assert "fresh key" in client.snapshot()[0]["last_error"]
+
+    dead = _Provider([], list_error=_AuthError())
+    only = _pool([_spec("a", key_env="KEY_A")], {"a": dead})
+    with pytest.raises(JudgeConfigError) as exhausted:
+        preflight_judge(only, ["a"], ["https://example.invalid/v1"])
+    assert "KEY_A" in str(exhausted.value)
+    assert "fresh key" in str(exhausted.value)
 
 
 def test_report_aggregates_agreement_and_dimension_means() -> None:
@@ -280,11 +275,16 @@ def test_report_aggregates_agreement_and_dimension_means() -> None:
 
 
 class _ScriptedClient:
+    """Mimics the rotating client's chat facade and pool bookkeeping."""
+
     def __init__(self, script: list[dict]) -> None:
         self._script = list(script)
+        self.used: list[str] = []
         self.chat = SimpleNamespace(completions=self)
 
     def create(self, **kwargs):
+        if not self.used or self.used[-1] != "scripted":
+            self.used.append("scripted")
         payload = self._script.pop(0) if self._script else {"action": "finish", "args": {}, "reason": "done"}
         return _completion(json.dumps(payload))
 
@@ -307,7 +307,9 @@ def test_live_case_captures_ledger_and_isolates_runs() -> None:
     assert first["steps"] == 3
     assert len(first["ledger"]) == 1
     assert first["ledger"][0]["amount"] == 63.70
+    assert first["agent_models"] == ["scripted"]
     assert first["hard"]["passed"] is True
 
     second = run_live_case(agl, _ScriptedClient(script), "scripted", corpus)
     assert len(second["ledger"]) == 1
+    assert second["agent_models"] == ["scripted"]

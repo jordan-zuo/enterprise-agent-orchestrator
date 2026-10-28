@@ -1,12 +1,10 @@
-"""Manual live-model demo. NOT part of CI: needs LLM_API_KEY and network.
+"""Manual live-model demo. NOT part of CI: needs provider keys and network.
 
 Usage (repo root, server not required):
-    $env:LLM_API_KEY = "<key>"
     python scripts/live_demo.py
 """
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 
@@ -25,12 +23,12 @@ except ImportError:
 
 
 def main() -> None:
-    model = os.environ.get("LLM_MODEL", "mistral-Nemo-Instruct-2407")
-    base_url = os.environ.get("LLM_BASE_URL", "https://api.llm7.io/v1")
-    print(f"model={model} base={base_url} (key hidden)")
     client = build_client()
+    labels = [spec.label for spec in client.specs]
+    print(f"agent pool={', '.join(labels)} (key hidden)")
     state = AgentState(task="Reconcile the Q3 utility bill against the lease clauses.")
-    decision = decide(state, client, model)
+    decision = decide(state, client, "auto")
+    print(f"answered by={client.last_label}")
     print(f"action={decision.action} args={decision.args}")
     print(f"reason={decision.reason}")
 

@@ -22,15 +22,13 @@ def build_client() -> Any:
     except ImportError as exc:
         raise RuntimeError("The 'python-dotenv' package is required.") from exc
     load_dotenv()
-    api_key = os.environ.get("LLM_API_KEY", "")
-    if not api_key:
-        raise RuntimeError("LLM_API_KEY is not set: live model calls need a key.")
     try:
-        from openai import OpenAI
+        from openai import OpenAI  # noqa: F401
     except ImportError as exc:
         raise RuntimeError("The 'openai' package is required for live calls.") from exc
-    base_url = os.environ.get("LLM_BASE_URL", "https://api.llm7.io/v1")
-    return OpenAI(api_key=api_key, base_url=base_url)
+    from agent.models import RotatingClient, specs_for
+
+    return RotatingClient(specs_for("agent"))
 
 
 def _prompt_for(state: Any, hint: str = "", context: str = "") -> str:
@@ -101,13 +99,14 @@ def _parse(content: str) -> ModelDecision:
 def _call_settings() -> dict[str, Any]:
     # Reasoning models spend output budget on hidden tokens before writing the
     # JSON route. Without room and a low effort they return empty content.
+    # The pool owns each provider's wire shape for the reasoning request.
     settings: dict[str, Any] = {
         "temperature": 0,
-        "max_tokens": int(os.environ.get("LLM_MAX_TOKENS", "500")),
+        "max_tokens": int(os.environ.get("LLM_MAX_TOKENS", "1200")),
     }
     effort = os.environ.get("LLM_REASONING_EFFORT", "").strip()
     if effort:
-        settings["extra_body"] = {"reasoning_effort": effort}
+        settings["reasoning"] = effort
     return settings
 
 

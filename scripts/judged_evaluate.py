@@ -29,6 +29,7 @@ sys.path.insert(0, str(ROOT))
 from agent.approvals import ApprovalQueue  # noqa: E402
 from agent.driver import build_client  # noqa: E402
 from agent.ledger_flow import resume_after_approval  # noqa: E402
+from agent.models import PoolError, describe_pool, pool_path  # noqa: E402
 from agent.runner import run_with_model  # noqa: E402
 from agent.states import AgentState  # noqa: E402
 from agent.tools import LedgerArgs, LedgerWriteTool, RetrievalTool  # noqa: E402
@@ -38,7 +39,6 @@ from scripts.judge import (  # noqa: E402
     JudgeConfigError,
     JudgeError,
     build_judge_client,
-    configured_models,
     judge_case,
     preflight_judge,
 )
@@ -205,6 +205,7 @@ def run_live_case(case: dict, agent_client: Any, agent_model: str, corpus: dict[
     state = AgentState(task=case["task"], max_steps=int(case["max_steps"]))
     approved_ticket: str | None = None
     error = ""
+    models_before = len(getattr(agent_client, "used", []) or [])
     started = time.perf_counter()
     try:
         state = run_with_model(
@@ -252,6 +253,7 @@ def run_live_case(case: dict, agent_client: Any, agent_model: str, corpus: dict[
         "ledger": [entry.model_dump() for entry in ledger.entries],
         "tickets": _tickets_from_history(state.history, approved_ticket),
         "history": list(state.history[-12:]),
+        "agent_models": list((getattr(agent_client, "used", []) or [])[models_before:]),
         "latency_ms": round(latency_ms, 2),
         "error": error,
     }
@@ -288,7 +290,7 @@ def _calibration_record(case: dict, ledger: list[dict], gated: bool, tickets: li
     return record
 
 
-def run_calibration(client: Any, model: str, base_url: str, cases: list[dict]) -> dict:
+def run_calibration(client: Any, cases: list[dict]) -> dict:
     by_id = {case["id"]: case for case in cases}
     agl = by_id["agl-due-post"]
     origin = by_id["origin-gated-post"]
@@ -347,7 +349,7 @@ def run_calibration(client: Any, model: str, base_url: str, cases: list[dict]) -
     for name, case, record, expected in probes:
         _pace_judge(5.0)
         try:
-            judged = judge_case(client, model, case, record, base_url=base_url)
+            judged = judge_case(client, case, record)
             actual = judged["verdict"]["verdict"]
             rationale = judged["verdict"]["rationale"]
         except JudgeError as exc:
@@ -404,6 +406,9 @@ def aggregate(records: list[dict], calibration: dict | None, meta: dict, judge_r
     models_used = sorted(
         {record["judge"].get("model") for record in judged if record["judge"].get("model")}
     )
+    agent_models_used = sorted(
+        {label for record in records for label in record.get("agent_models") or []}
+    )
 
     judge_tokens = 0
     judge_latency = 0.0
@@ -429,6 +434,7 @@ def aggregate(records: list[dict], calibration: dict | None, meta: dict, judge_r
         "judge_lenient": lenient,
         "judge_errors": total - len(judged) if judge_required else 0,
         "judge_models_used": models_used,
+        "agent_models_used": agent_models_used,
         "mean_scores": mean_scores,
         "mean_steps": round(sum(record["steps"] for record in records) / total, 2) if total else 0.0,
         "agent_latency_ms": round(sum(record["latency_ms"] for record in records), 2),
@@ -458,10 +464,10 @@ def render_report(summary: dict, judge_required: bool) -> str:
         "",
         "| Setting | Value |",
         "| --- | --- |",
-        f"| Agent model | `{summary.get('agent_model')}` |",
-        f"| Agent base | `{summary.get('agent_base_url')}` |",
-        f"| Judge models | `{summary.get('judge_model') or 'not used'}` |",
-        f"| Judge base | `{summary.get('judge_base_url') or 'not used'}` |",
+        f"| Agent pool | `{', '.join(summary.get('agent_pool') or []) or 'none'}` |",
+        f"| Agent models used | {', '.join(summary.get('agent_models_used') or []) or 'none'} |",
+        f"| Judge pool | `{', '.join(summary.get('judge_pool') or []) or 'not used'}` |",
+        f"| Judge models used | {', '.join(summary.get('judge_models_used') or []) or 'none'} |",
         f"| Rubric | `{RUBRIC_VERSION}` (`{RUBRIC_SHA}`) |",
         f"| Judge thinking | `{summary.get('reasoning_effort') or 'n/a'}` |",
         "",
@@ -482,7 +488,6 @@ def render_report(summary: dict, judge_required: bool) -> str:
         f"| Agent latency | {summary['agent_latency_ms']} ms |",
         f"| Judge latency | {summary['judge_latency_ms']} ms |",
         f"| Judge tokens | {summary['judge_tokens']} |",
-        f"| Judge models used | {', '.join(summary.get('judge_models_used') or []) or 'none'} |",
         "",
     ]
 
@@ -584,11 +589,19 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.dry_run:
         print(f"suite: {len(cases)} case(s): {', '.join(case['id'] for case in cases)}")
-        print(f"agent: model={os.environ.get('LLM_MODEL', 'mistral-Nemo-Instruct-2407')} "
-              f"key={'set' if os.environ.get('LLM_API_KEY') else 'missing'}")
-        print(f"judge: models={', '.join(configured_models())} "
-              f"base={os.environ.get('JUDGE_BASE_URL', 'https://api.groq.com/openai/v1')} "
-              f"key={'set' if os.environ.get('JUDGE_API_KEY') else 'missing'}")
+        print(f"pool config: {pool_path()}")
+        try:
+            for role in ("agent", "judge"):
+                print(f"{role} pool:")
+                for row in describe_pool(role):
+                    state = "set" if row["key_set"] else "MISSING"
+                    print(
+                        f"  {row['label']}: {row['model']} via {row['provider']} "
+                        f"cap={row['max_output_tokens']} key={row['key_env']} ({state})"
+                    )
+        except PoolError as exc:
+            print(f"pool error: {exc}")
+            return 2
         print(f"rubric: {RUBRIC_VERSION} ({RUBRIC_SHA})")
         return 0
 
@@ -597,17 +610,17 @@ def main(argv: list[str] | None = None) -> int:
     except RuntimeError as exc:
         print(f"agent config error: {exc}")
         return 2
-    agent_model = os.environ.get("LLM_MODEL", "mistral-Nemo-Instruct-2407")
-    agent_base_url = os.environ.get("LLM_BASE_URL", "https://api.llm7.io/v1")
+    agent_model = "auto"
+    agent_pool = [spec.label for spec in agent_client.specs]
 
     judge_client = None
-    judge_model = ""
-    judge_base_url = ""
+    judge_pool: list[str] = []
+    judge_base_urls: list[str] = []
     reasoning_effort = ""
     if not args.skip_judge:
         try:
-            judge_client, judge_model, judge_base_url = build_judge_client()
-            preflight_judge(judge_client, judge_model, judge_base_url)
+            judge_client, judge_pool, judge_base_urls = build_judge_client()
+            preflight_judge(judge_client, judge_pool, judge_base_urls)
         except JudgeConfigError as exc:
             print(f"judge config error: {exc}")
             return 2
@@ -619,7 +632,7 @@ def main(argv: list[str] | None = None) -> int:
 
     calibration = None
     if judge_client is not None:
-        calibration = run_calibration(judge_client, judge_model, judge_base_url, suite["cases"])
+        calibration = run_calibration(judge_client, suite["cases"])
         print(
             f"calibration: {calibration['passed']}/{calibration['total']}"
             f" ({'ok' if calibration['ok'] else 'FAILED'})",
@@ -637,7 +650,7 @@ def main(argv: list[str] | None = None) -> int:
         if judge_client is not None:
             _pace_judge()
             try:
-                record["judge"] = judge_case(judge_client, judge_model, case, record, base_url=judge_base_url)
+                record["judge"] = judge_case(judge_client, case, record)
                 record["judge_error"] = ""
                 reasoning_effort = record["judge"].get("reasoning_effort") or reasoning_effort
             except JudgeError as exc:
@@ -656,9 +669,9 @@ def main(argv: list[str] | None = None) -> int:
 
     meta = {
         "agent_model": agent_model,
-        "agent_base_url": agent_base_url,
-        "judge_model": judge_model or None,
-        "judge_base_url": judge_base_url or None,
+        "agent_pool": agent_pool,
+        "judge_pool": judge_pool or None,
+        "judge_base_urls": judge_base_urls or None,
         "reasoning_effort": reasoning_effort or None,
         "rubric_version": RUBRIC_VERSION,
         "rubric_sha": RUBRIC_SHA,

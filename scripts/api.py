@@ -63,7 +63,7 @@ def _client() -> Any:
 
 
 def _model() -> str:
-    return os.environ.get("LLM_MODEL", "mistral-Nemo-Instruct-2407")
+    return "auto"
 
 
 def _docs() -> dict[str, str]:
