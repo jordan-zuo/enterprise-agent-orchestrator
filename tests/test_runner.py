@@ -31,6 +31,19 @@ class _ScriptedClient:
 DOCS = {"lease-7": "recovery clause submetered electricity one hundred percent"}
 
 
+class _SilentAfterScriptClient(_ScriptedClient):
+    """Returns empty model content once the script is exhausted."""
+
+    def create(self, **kwargs):
+        if self._script:
+            return super().create(**kwargs)
+        return type(
+            "Completion",
+            (),
+            {"choices": [type("Choice", (), {"message": type("Msg", (), {"content": ""})()})()]},
+        )()
+
+
 def test_model_run_completes_retrieve_then_finish() -> None:
     client = _ScriptedClient(
         [
@@ -76,6 +89,34 @@ def test_posting_on_the_last_allowed_step_still_completes() -> None:
         "step ceiling reached after the required posting" in event
         for event in state.history
     )
+
+
+def test_posting_survives_a_provider_that_stops_answering() -> None:
+    """A write that landed must not be reported as a failure."""
+    client = _SilentAfterScriptClient(
+        [
+            {
+                "action": "ledger_write",
+                "args": {"entry_id": "sam", "amount": 10.0, "source_doc": "d"},
+                "reason": "post it",
+            }
+        ]
+    )
+    state = run_with_model(
+        AgentState(
+            task="post the bill",
+            max_steps=6,
+            evidence=[Evidence(doc_id="d", text="total 10.00")],
+        ),
+        client,
+        "test",
+        RetrievalTool(DOCS),
+        LedgerWriteTool(),
+        ApprovalQueue(),
+    )
+    assert state.status == "done"
+    assert state.posted
+    assert any("posting landed" in event for event in state.history)
 
 
 def test_model_run_pauses_for_big_ledger_write() -> None:
@@ -219,6 +260,27 @@ def test_finish_after_an_already_posted_bill_is_done() -> None:
     )
     assert state.status == "done"
     assert ledger.entries == []
+
+
+def test_empty_finish_answer_is_rejected_once() -> None:
+    """An answer task cannot finish with a blank reason."""
+    client = _ScriptedClient(
+        [
+            {"action": "finish", "args": {}, "reason": ""},
+            {"action": "finish", "args": {}, "reason": "Jane Citizen exported 463 kWh"},
+        ]
+    )
+    state = run_with_model(
+        AgentState(task="Which customer exported the most solar power?", max_steps=4),
+        client,
+        "test",
+        RetrievalTool(DOCS),
+        LedgerWriteTool(),
+        ApprovalQueue(),
+    )
+    assert state.status == "done"
+    assert state.step_count == 2
+    assert any(line.startswith("not finished: put the complete answer") for line in state.history)
 
 
 def test_model_run_bad_args_become_feedback_not_crash() -> None:

@@ -5,6 +5,7 @@ from agent.guardrails import (
     assess_due_amount,
     assess_grounding,
     assess_ledger,
+    assess_vendor,
     source_evidence,
 )
 from agent.periods import evidence_months, period_compatible, task_markers
@@ -24,6 +25,14 @@ def _validate(
     ok, grounding_reason = assess_grounding(args, state.evidence)
     if not ok:
         return False, {"grounding": f"failed: {grounding_reason}"}, grounding_reason
+
+    vendor_ok, vendor_reason = assess_vendor(state.task, args, state.evidence)
+    if not vendor_ok:
+        return (
+            False,
+            {"grounding": grounding_reason, "vendor": f"failed: {vendor_reason}"},
+            vendor_reason,
+        )
 
     math_ok, math_reason = verify_ledger_math(args)
     if not math_ok:

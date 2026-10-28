@@ -78,7 +78,27 @@ def run_with_model(
             if state.status == "running":
                 state.status = "done"
             return state
-        decision = decide(state, client, model, context=context)
+        try:
+            decision = decide(state, client, model, context=context)
+        except ValueError as exc:
+            # A provider that stops returning usable routes must not turn an
+            # already-landed posting into a failure.
+            if _asks_for_post(state.task) and (state.posted or state.settled):
+                state.status = "done"
+                state.log(
+                    "done: the posting landed before the model stopped routing",
+                    kind="status",
+                    data={"reason": str(exc)},
+                )
+                return state
+            state.status = "failed"
+            state.failure_reason = f"model stopped returning decisions: {exc}"
+            state.log(
+                "failed: no usable decision from the model",
+                kind="error",
+                data={"reason": str(exc)},
+            )
+            return state
         if _cancelled():
             # The answer arrived after the human cancelled; do not execute it.
             return _stop_for_cancel(state)
@@ -128,6 +148,25 @@ def run_with_model(
                     " made yet. Post the bill, or say why it cannot be posted.",
                     kind="rejected",
                     data={"action": "finish", "reason": "no ledger write yet"},
+                )
+                continue
+            if not decision.reason.strip() and not _asks_for_post(state.task):
+                # An informational task is not done until the answer is
+                # actually stated. A blank finish is a non-answer.
+                if state.finish_nudged:
+                    state.status = "failed"
+                    state.failure_reason = "the task asked a question and the answer was empty"
+                    state.log(
+                        "ended: finish was called with no answer.",
+                        kind="error",
+                        data={"reason": state.failure_reason, "action": "finish"},
+                    )
+                    return state
+                state.finish_nudged = True
+                state.log(
+                    "not finished: put the complete answer in the finish reason.",
+                    kind="rejected",
+                    data={"action": "finish", "reason": "answer was empty"},
                 )
                 continue
             state.status = "done"

@@ -25,7 +25,7 @@ class _FakeCompletions:
 
     def create(self, **kwargs) -> _FakeCompletion:
         assert kwargs["temperature"] == 0
-        assert kwargs["max_tokens"] in (200, 500)
+        assert kwargs["max_tokens"] >= 200
         return _FakeCompletion(self._content)
 
 

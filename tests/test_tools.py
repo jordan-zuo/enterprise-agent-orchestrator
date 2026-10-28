@@ -52,6 +52,13 @@ def test_ledger_rejects_bad_args() -> None:
         LedgerArgs(entry_id="", amount=-5, source_doc="")
 
 
+def test_ledger_blocks_a_second_identical_post_in_one_run() -> None:
+    ledger = LedgerWriteTool()
+    args = LedgerArgs(entry_id="j-001", amount=63.70, source_doc="agl")
+    ledger.execute(AgentState(task="t"), args)
+    assert ledger.already_posted(args) is not None
+
+
 def test_retrieval_snippet_preserves_query_matches_and_account_number() -> None:
     corpus = {
         "bill-1": (
@@ -112,3 +119,26 @@ def test_retrieval_ranks_multiple_candidates_by_relevance() -> None:
     assert "bill-jane" in event
     assert "bill-sam" in event
     assert "bill-water" not in event
+
+
+def test_retrieval_prefers_a_named_document_over_a_body_match() -> None:
+    """Asking for AER must not return the AGL bill just because both say due."""
+    body = "Tax invoice. Amount due 79.87 dollars."
+    tool = RetrievalTool({"agl-sample-bill": body, "aer-example-bill": body})
+    event = tool.execute(AgentState(task="t"), RetrievalArgs(query="AER amount due", top_k=1))
+    assert event.startswith("retrieve [AER amount due]: aer-example-bill")
+
+
+def test_retrieval_snippet_keeps_the_billing_period_when_asked() -> None:
+    filler = "Payment options and contact details for your account. " * 30
+    corpus = {
+        "bill-long": (
+            "Tax invoice. Account number 123456. Amount due 63.70 dollars. "
+            + filler
+            + " Bill period: 5 March 2023 to 4 April 2023 (31 Days)."
+        )
+    }
+    tool = RetrievalTool(corpus)
+    event = tool.execute(AgentState(task="t"), RetrievalArgs(query="billing period"))
+    assert "5 March 2023" in event
+    assert "4 April 2023" in event

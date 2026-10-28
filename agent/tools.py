@@ -22,6 +22,8 @@ _SYNONYMS = {
     "electricity": {"power", "energy"},
     "power": {"electricity", "energy"},
     "energy": {"electricity", "power"},
+    "bill": {"billing"},
+    "billing": {"bill"},
 }
 
 
@@ -107,13 +109,44 @@ class RetrievalTool:
             for m in re.finditer(rf"\b{re.escape(w)}", low):
                 matches.append((m.start(), m.end(), 6, 40, 90))
 
-        for anchor in ("account number", "name", "customer", "tenant"):
+        for anchor in ("account number",):
             for m in re.finditer(rf"\b{re.escape(anchor)}\b", low):
-                matches.append((m.start(), m.end(), 15, 30, 100))
+                matches.append((m.start(), m.end(), 18, 30, 100))
+
+        # A posted bill must name whose it is. Match a labelled person name,
+        # not supplier boilerplate such as "Retailer Name ABN".
+        for m in re.finditer(
+            r"\b(?:name|tenant|customer)\b[:\s]{0,3}[A-Z][a-z]+ [A-Z][a-z]+",
+            cleaned,
+            re.IGNORECASE,
+        ):
+            matches.append((m.start(), m.end(), 24, 10, 0))
+
+        # Some bills print the customer above a postal address instead of
+        # beside "Name".
+        for m in re.finditer(r"\bpo box\b", low):
+            matches.append((m.start(), m.end(), 24, 80, 60))
 
         for anchor in ("amount due", "total due", "total bill"):
             for m in re.finditer(re.escape(anchor), low):
                 matches.append((m.start(), m.end(), 7, 30, 90))
+
+        # A period question is answered by the billing dates, which sit far
+        # from the amounts and would otherwise lose the snippet budget.
+        if re.search(
+            r"\b(period|billing|date|month|cover|covers|when|january|february|"
+            r"march|april|may|june|july|august|september|october|november|december)\b",
+            raw_query,
+        ):
+            for m in re.finditer(r"\b(?:bill|billing)\s+(?:period|dates?)\b", low):
+                matches.append((m.start(), m.end(), 25, 20, 180))
+
+        # Solar questions are answered by the feed-in tariff total. The meter
+        # table nearby shows start, end and usage readings, which invite a
+        # misread, so only the tariff row is anchored.
+        if re.search(r"\b(solar|exports?|feed-?in|kwh)\b", raw_query):
+            for m in re.finditer(r"\bfeed[- ]?in tariff\b", low):
+                matches.append((m.start(), m.end(), 22, 140, 90))
 
         for m in _DUE_FIGURE_RE.finditer(cleaned):
             sign, number = m.group(1), m.group(2)
@@ -175,9 +208,9 @@ class RetrievalTool:
     def execute(self, state: AgentState, args: RetrievalArgs) -> str:
         query_terms = _terms(args.query)
 
-        def _score(text: str) -> float:
+        def _score_doc(doc_id: str, text: str) -> float:
             low = text.lower()
-            doc_terms = _terms(text)
+            doc_terms = _terms(text) | _terms(doc_id)
             matched = query_terms & doc_terms
             if not matched:
                 return 0.0
@@ -185,12 +218,23 @@ class RetrievalTool:
             raw_q = args.query.lower().strip()
             if raw_q in low:
                 score += 15.0
+            # A named document in the query must outrank a body-only hit, or
+            # asking for AER can return the AGL bill.
+            score += float(len(query_terms & _terms(doc_id)) * 6)
             for term in query_terms:
                 score += min(low.count(term), 5)
             return score
 
-        ranked = sorted(self._documents.items(), key=lambda item: _score(item[1]), reverse=True)
-        top = [(doc_id, text) for doc_id, text in ranked[: args.top_k] if _score(text) > 0]
+        ranked = sorted(
+            self._documents.items(),
+            key=lambda item: _score_doc(*item),
+            reverse=True,
+        )
+        top = [
+            (doc_id, text)
+            for doc_id, text in ranked[: args.top_k]
+            if _score_doc(doc_id, text) > 0
+        ]
         if not top:
             return f"retrieve [{args.query}]: no matching document"
         parts = []
@@ -227,6 +271,11 @@ class LedgerWriteTool:
         self._posted = posted
 
     def already_posted(self, args: LedgerArgs) -> dict | None:
+        # A run can propose the same bill twice before the service has a
+        # chance to reload it from SQLite. One bill, one posting, always.
+        for entry in self.entries:
+            if entry.source_doc == args.source_doc and abs(entry.amount - args.amount) <= 0.01:
+                return {"entry_id": entry.entry_id, "run_id": "current-run"}
         if self._posted is None:
             return None
         return self._posted(args)

@@ -77,6 +77,22 @@ def test_bill_math_mismatch_rejected() -> None:
     assert len(ledger.entries) == 0
 
 
+def test_named_bill_absent_from_evidence_is_rejected() -> None:
+    """A Jemena request must not be settled by posting the AER bill."""
+    ledger, queue = LedgerWriteTool(), ApprovalQueue()
+    state = AgentState(
+        task="Post the amount due from the Jemena gas bill.",
+        evidence=[
+            Evidence(doc_id="aer-example-bill", text="Amount due 79.87 dollars")
+        ],
+    )
+    args = LedgerArgs(entry_id="j-1", amount=79.87, source_doc="aer-example-bill")
+    event = guarded_ledger_write(state, ledger, args, queue)
+    assert event.startswith("rejected:")
+    assert "jemena" in event
+    assert ledger.entries == []
+
+
 def test_unknown_ticket_raises() -> None:
     queue = ApprovalQueue()
     with pytest.raises(KeyError, match="unknown approval ticket"):

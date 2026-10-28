@@ -61,6 +61,10 @@ def _prompt_for(state: Any, hint: str = "", context: str = "") -> str:
         "finish: task is fully done; for informational questions, provide the complete answer including all requested details in reason. "
         "If a requested detail (such as customer name) was not in the snippet, retrieve with that term or doc id first before finishing. "
         "For comparative questions (such as who has the highest or lowest amount), make sure to compare all candidate bills in context before concluding. "
+        "One retrieve with top_k up to 10 returns every matching bill; prefer that over fetching documents one by one. "
+        "A retrieve result can list several documents separated by '||'; read every one before comparing. "
+        "For solar exports, the billing-period total is the feed-in tariff row in kWh; a chart figure such as 'Solar exports: 15 kWh' is a daily average, not the total. "
+        "If a bill has no solar export row, that customer has no solar exports. "
         "request_approval: pause for a human decision. "
         "Arg shapes: retrieve takes {query, top_k (optional, 1 to 10)}; ledger_write takes "
         "{entry_id, amount, source_doc}; finish takes {}; request_approval "
@@ -91,6 +95,19 @@ def _parse(content: str) -> ModelDecision:
     )
 
 
+def _call_settings() -> dict[str, Any]:
+    # Reasoning models spend output budget on hidden tokens before writing the
+    # JSON route. Without room and a low effort they return empty content.
+    settings: dict[str, Any] = {
+        "temperature": 0,
+        "max_tokens": int(os.environ.get("LLM_MAX_TOKENS", "500")),
+    }
+    effort = os.environ.get("LLM_REASONING_EFFORT", "").strip()
+    if effort:
+        settings["extra_body"] = {"reasoning_effort": effort}
+    return settings
+
+
 def decide(state: Any, client: Any, model: str, max_attempts: int = 2, context: str = "") -> ModelDecision:
     """Ask the model what to do next. Malformed or unknown answers raise.
 
@@ -102,8 +119,7 @@ def decide(state: Any, client: Any, model: str, max_attempts: int = 2, context: 
         completion = client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": _prompt_for(state, hint, context)}],
-            temperature=0,
-            max_tokens=500,
+            **_call_settings(),
         )
         content = completion.choices[0].message.content or ""
         try:
